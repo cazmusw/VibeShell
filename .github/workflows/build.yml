@@ -1,0 +1,99 @@
+name: Build and package
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  source:
+    name: Detect imported application sources
+    runs-on: ubuntu-24.04
+    outputs:
+      ready: ${{ steps.detect.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: detect
+        shell: bash
+        run: |
+          if [[ -f Cargo.toml && -f Cargo.lock && -f flake.nix && -f flake.lock ]]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::Build is waiting for the application source import (Cargo.toml, Cargo.lock, flake.nix, flake.lock).'
+            echo '### Application build skipped: sources have not been imported yet.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  build:
+    name: Build NixOS package (x86_64)
+    needs: source
+    if: needs.source.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Build release package without tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix build --impure --print-build-logs --out-link result --expr '
+            let flake = builtins.getFlake (toString ./.);
+            in flake.packages.x86_64-linux.default.overrideAttrs (_: { doCheck = false; })
+          '
+      - name: Export binaries and complete runtime closure
+        shell: bash
+        run: bash scripts/export-nix-package.sh result dist
+      - name: Upload ready-to-import NixOS binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: VibeShell-x86_64-linux-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Build summary
+        shell: bash
+        run: |
+          {
+            echo '### NixOS x86_64 binary package built'
+            echo 'The artifact includes the application, all Nix runtime dependencies, an installer and SHA-256 checksums.'
+            echo 'Tests were intentionally disabled at the user request. Graphical runtime behavior was not validated by this workflow.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Create draft release for version tag
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') && needs.build.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: VibeShell-x86_64-linux-${{ github.sha }}
+          path: dist
+      - name: Create draft release with binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" dist/* \
+            --repo "$GH_REPO" --verify-tag --draft \
+            --title "VibeShell $RELEASE_TAG" \
+            --notes 'NixOS x86_64 binary closure. Download all assets and run bash install.sh from the download directory. Tests were intentionally disabled; graphical behavior still requires validation.'
