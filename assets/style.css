@@ -1,0 +1,16 @@
+window { background: transparent; color: @ink; }
+.panel { background: @surface; padding: 0 12px; border-bottom: 1px solid @edge; }
+.panel button { background: transparent; border: none; min-height: 22px; padding: 0 8px; color: @ink; }
+.dock { background: @surface; padding: 10px 10px 4px; border: 1px solid @edge; border-radius: 18px; }
+.dock-icon { background: transparent; border: none; border-radius: 12px; padding: 4px 6px 0; color: @ink; }
+.dock-icon:hover, .dock-icon.active { background: alpha(#8fa7ed, 0.20); }
+.indicator { font-size: 12px; min-height: 12px; }
+.launcher, .settings { background: @surface; padding: 24px; border: 1px solid @edge; border-radius: 16px; color: @ink; }
+.results { background: transparent; color: @ink; }
+.results row { padding: 4px 12px; border-radius: 10px; }
+.title { font-size: 22px; font-weight: bold; }
+.notification { padding: 12px; border: 1px solid @edge; border-radius: 10px; }
+button:focus-visible, entry:focus-visible { outline: 2px solid #8fa7ed; outline-offset: 2px; }
+popover contents { background: @surface; color: @ink; border: 1px solid @edge; border-radius: 12px; padding: 8px; }
+
+.dock-scroll { background: transparent; border: none; color: @ink; padding: 2px; min-width: 20px; }

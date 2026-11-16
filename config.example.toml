@@ -1,0 +1,16 @@
+schema_version = 1
+mode = "defaults"
+theme = "dark"
+reduced_motion = false
+[dock]
+icon_size = 48
+margin = 12
+autohide = false
+show_delay_ms = 150
+hide_delay_ms = 700
+magnification = true
+magnification_factor = 1.45
+max_width_ratio = 0.9
+pinned = ["firefox.desktop", "org.gnome.Nautilus.desktop"]
+[panel]
+height = 32

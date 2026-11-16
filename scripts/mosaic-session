@@ -1,0 +1,35 @@
+#!/bin/sh
+# Launch instead of labwc, with Home Manager's start-target in labwc/autostart.
+# One Labwc graphical session per user is supported.
+set -eu
+if ! command -v labwc >/dev/null 2>&1; then
+    echo 'mosaic-session: labwc not found' >&2
+    exit 1
+fi
+if ! systemctl --user show-environment >/dev/null 2>&1; then
+    echo 'mosaic-session: systemd user manager unavailable' >&2
+    exit 1
+fi
+if systemctl --user is-active --quiet mosaic-session.target; then
+    echo 'mosaic-session: another managed session is already running' >&2
+    exit 1
+fi
+export XDG_CURRENT_DESKTOP="labwc"
+child=
+cleanup() {
+    systemctl --user stop mosaic-session.target || true
+    dbus-update-activation-environment --systemd WAYLAND_DISPLAY= DISPLAY= XDG_CURRENT_DESKTOP= || true
+    systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP || true
+}
+terminate() {
+    if test -n "$child"; then kill -TERM "$child" 2>/dev/null || true; fi
+}
+trap cleanup EXIT
+trap terminate HUP INT TERM
+labwc "$@" &
+child=$!
+status=0
+wait "$child" || status=$?
+# A trapped signal can interrupt wait before the compositor exits.
+if kill -0 "$child" 2>/dev/null; then wait "$child" || status=$?; fi
+exit "$status"

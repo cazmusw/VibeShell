@@ -1,0 +1,17 @@
+[package]
+name = "shell-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[[bin]]
+name = "mosaic-shell"
+path = "src/main.rs"
+[dependencies]
+anyhow.workspace = true
+shell-core.workspace = true
+shell-wayland = { path = "../shell-wayland" }
+serde_json.workspace = true
+toml.workspace = true
+gtk = { package = "gtk4", version = "0.10", features = ["v4_12"] }
+gtk4-layer-shell = "0.7"
+zbus = "5.12"

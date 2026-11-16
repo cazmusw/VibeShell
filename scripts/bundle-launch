@@ -1,0 +1,48 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+program=${1:?Specify mosaic-shell, mosaic-services or shellctl}
+shift
+case "$program" in mosaic-shell|mosaic-services|shellctl|runtime-check) ;; *) echo 'Unknown binary' >&2; exit 2;; esac
+# Invoke the included ELF loader: NixOS does not need /lib64/ld-linux or nix-ld.
+unset LD_LIBRARY_PATH LD_PRELOAD
+# Runtime data must follow the relocated libraries, not /usr on the host.
+export XKB_CONFIG_ROOT="$root/share/X11/xkb"
+export XLOCALEDIR="$root/share/X11/locale"
+export LOCPATH="$root/share/locale-runtime"
+export GDK_BACKEND=wayland
+export GSK_RENDERER=${GSK_RENDERER:-cairo}
+export XDG_DATA_DIRS="$root/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export GSETTINGS_SCHEMA_DIR="$root/share/glib-2.0/schemas"
+export FONTCONFIG_FILE="$root/share/fontconfig/fonts.conf"
+export GIO_MODULE_DIR="$root/lib/gio/modules"
+export GIO_EXTRA_MODULES=
+export GTK_PATH="$root/lib/gtk-4.0"
+loader="$root/lib/ld-linux-x86-64.so.2"
+# A relocatable pixbuf cache supports SVG icons without host GTK loader modules.
+if test "$program" = mosaic-shell; then
+    if test "$(id -u)" -eq 0; then
+        echo 'Mosaic: запускайте из терминала пользователя вашей Labwc-сессии, без sudo/root.' >&2
+        exit 1
+    fi
+    umask 077
+    bundle_id=$(printf '%s' "$root" | cksum)
+    bundle_id=${bundle_id%% *}
+    cache="${XDG_CACHE_HOME:-${HOME:?HOME must be set}/.cache}/mosaic-shell-runtime/$bundle_id"
+    if ! mkdir -p "$cache" 2>/dev/null || ! test -w "$cache"; then
+        # Old root-owned caches must not prevent an unprivileged graphical launch.
+        # mktemp creates a new private directory; never chmod/chown user directories.
+        runtime="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
+        if ! cache=$(mktemp -d "$runtime/mosaic-shell-cache.XXXXXXXX"); then
+            echo "Mosaic: cannot create a writable image-loader cache. Check XDG_CACHE_HOME and XDG_RUNTIME_DIR." >&2
+            exit 1
+        fi
+        echo "Mosaic: normal cache is not writable; using temporary cache: $cache" >&2
+    fi
+    export GDK_PIXBUF_MODULE_FILE="$cache/loaders.cache"
+    if ! test -f "$GDK_PIXBUF_MODULE_FILE"; then
+        "$loader" --library-path "$root/lib" "$root/libexec/gdk-pixbuf-query-loaders" "$root/lib/pixbuf-loaders/"*.so > "$cache/loaders.$$.tmp"
+        mv "$cache/loaders.$$.tmp" "$GDK_PIXBUF_MODULE_FILE"
+    fi
+fi
+exec "$loader" --library-path "$root/lib" "$root/bin/$program" "$@"
