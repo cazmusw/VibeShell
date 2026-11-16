@@ -55,7 +55,10 @@ jobs:
           '
       - name: Export binaries and complete runtime closure
         shell: bash
-        run: bash scripts/export-nix-package.sh result dist
+        run: |
+          nix shell --impure --expr '
+            (builtins.getFlake (toString ./.)).inputs.nixpkgs.legacyPackages.x86_64-linux.zstd
+          ' --command bash scripts/export-nix-package.sh result dist
       - name: Upload ready-to-import NixOS binaries
         uses: actions/upload-artifact@v4
         with:
