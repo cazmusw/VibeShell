@@ -1,4 +1,4 @@
-use crate::{catalog::Catalog, dock, ipc, launcher, panel};
+use crate::{catalog::Catalog, dock, ipc, launcher};
 use gtk::{glib, prelude::*, Orientation};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use shell_core::Config;
@@ -11,6 +11,10 @@ use std::{
 
 pub struct Shell {
     pub app: gtk::Application,
+    pub _session_hold: gtk::gio::ApplicationHoldGuard,
+    pub panels: RefCell<Vec<gtk::ApplicationWindow>>,
+    pub monitor_handlers: RefCell<Vec<(gtk::gdk::Monitor, glib::SignalHandlerId)>>,
+    pub outputs_pending: Cell<bool>,
     pub css_provider: gtk::CssProvider,
     pub config: RefCell<Config>,
     pub catalog: Catalog,
@@ -32,6 +36,10 @@ pub fn start(app: &gtk::Application) -> anyhow::Result<()> {
     let wayland = WaylandHandle::start()?;
     let shell = Rc::new(Shell {
         app: app.clone(),
+        _session_hold: app.hold(),
+        panels: RefCell::new(vec![]),
+        monitor_handlers: RefCell::new(vec![]),
+        outputs_pending: Cell::new(false),
         css_provider: gtk::CssProvider::new(),
         config: RefCell::new(config),
         catalog,
@@ -51,15 +59,11 @@ pub fn start(app: &gtk::Application) -> anyhow::Result<()> {
     shell.apply_theme();
     let display = gtk::gdk::Display::default().ok_or_else(|| anyhow::anyhow!("Нет GDK display"))?;
     let monitors = display.monitors();
-    for i in 0..monitors.n_items() {
-        if let Some(monitor) = monitors.item(i).and_downcast::<gtk::gdk::Monitor>() {
-            panel::create(&shell, &monitor);
-        }
-    }
-    if let Some(monitor) = monitors.item(0).and_downcast::<gtk::gdk::Monitor>() {
-        let dock = dock::Dock::new(&shell, &monitor);
-        shell.docks.borrow_mut().push(dock);
-    }
+    shell.rebuild_outputs();
+    let weak = Rc::downgrade(&shell);
+    monitors.connect_items_changed(move |_, _, _, _| {
+        if let Some(shell) = weak.upgrade() { shell.schedule_outputs(); }
+    });
     let rx = ipc::start();
     let s = shell.clone();
     let revision = Cell::new(u64::MAX);
@@ -183,6 +187,11 @@ impl Shell {
         }
     }
     fn refresh_dock(self: &Rc<Self>) {
+        let height = self.config.borrow().panel.height;
+        for panel in self.panels.borrow().iter() {
+            panel.set_exclusive_zone(height);
+            if let Some(row) = panel.child() { row.set_height_request(height); }
+        }
         for dock in self.docks.borrow().iter() {
             dock.reconfigure(self);
         }

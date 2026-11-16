@@ -5,6 +5,7 @@ mod dock_icon;
 mod ipc;
 mod launcher;
 mod panel;
+mod outputs;
 use gtk::prelude::*;
 fn main() -> gtk::glib::ExitCode {
     let app = gtk::Application::builder()
@@ -12,7 +13,9 @@ fn main() -> gtk::glib::ExitCode {
         .build();
     let failed = std::rc::Rc::new(std::cell::Cell::new(false));
     let flag = failed.clone();
+    let started = std::cell::Cell::new(false);
     app.connect_activate(move |a| {
+        if started.replace(true) { return; }
         if let Err(e) = app::start(a) {
             eprintln!("Mosaic: {e:#}");
             flag.set(true);

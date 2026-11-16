@@ -13,6 +13,7 @@ use std::{
 pub struct Dock {
     shell: Weak<Shell>,
     needs_rebuild: Cell<bool>,
+    disposed: Cell<bool>,
     window: gtk::ApplicationWindow,
     sensor: gtk::ApplicationWindow,
     monitor: gtk::gdk::Monitor,
@@ -78,6 +79,7 @@ impl Dock {
         let this = Rc::new(Self {
             shell: Rc::downgrade(shell),
             needs_rebuild: Cell::new(false),
+            disposed: Cell::new(false),
             window,
             sensor,
             monitor: monitor.clone(),
@@ -205,6 +207,7 @@ impl Dock {
             || !self.menus.borrow().is_empty()
     }
     fn schedule_show(self: &Rc<Self>) {
+        if self.disposed.get() { return; }
         self.cancel_pending();
         if self.visible.get() {
             return;
@@ -224,6 +227,7 @@ impl Dock {
         ));
     }
     fn schedule_hide(self: &Rc<Self>) {
+        if self.disposed.get() { return; }
         self.cancel_pending();
         if !self.config.borrow().autohide || !self.visible.get() || self.pinned_open() {
             return;
@@ -446,6 +450,15 @@ impl Dock {
         });
         self.sensor.set_visible(config.autohide);
     }
+    pub fn destroy(&self) {
+        if self.disposed.replace(true) { return; }
+        self.cancel_pending();
+        self.finish_keyboard();
+        let menus = std::mem::take(&mut *self.menus.borrow_mut());
+        for pop in menus { pop.popdown(); }
+        self.sensor.close();
+        self.window.close();
+    }
     fn register_menu(self: &Rc<Self>, pop: &gtk::Popover) {
         self.cancel_pending();
         self.menus.borrow_mut().push(pop.clone());
@@ -457,6 +470,7 @@ impl Dock {
                 pop.unparent();
             }
             if let Some(d) = weak.upgrade() {
+                if d.disposed.get() { return; }
                 d.menus.borrow_mut().retain(|p| p != pop);
                 d.finish_keyboard();
                 if d.menus.borrow().is_empty() && d.needs_rebuild.replace(false) {

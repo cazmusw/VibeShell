@@ -2,7 +2,7 @@
 
 Rust/GTK4 desktop shell for Labwc and NixOS, continued from Mosaic Shell.
 
-Current source version: **0.2.0**. Dock, panel, application launcher, window integration and experimental notifications are implemented. The full 1.0 specification is still in progress.
+Current source version: **0.2.1**. Dock, panel, application launcher, window integration and experimental notifications are implemented. The full 1.0 specification is still in progress.
 
 ## Build and run
 

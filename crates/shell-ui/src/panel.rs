@@ -2,7 +2,7 @@ use crate::app::Shell;
 use gtk::{prelude::*, Orientation};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::{rc::Rc, time::Duration};
-pub fn create(shell: &Rc<Shell>, monitor: &gtk::gdk::Monitor) {
+pub fn create(shell: &Rc<Shell>, monitor: &gtk::gdk::Monitor) -> gtk::ApplicationWindow {
     let window = gtk::ApplicationWindow::builder()
         .application(&shell.app)
         .title("Mosaic Panel")
@@ -61,8 +61,9 @@ pub fn create(shell: &Rc<Shell>, monitor: &gtk::gdk::Monitor) {
     let pop = gtk::Popover::new();
     pop.set_child(Some(&calendar));
     clock.set_popover(Some(&pop));
-    let c = clock.clone();
+    let weak_clock = clock.downgrade();
     let tick = move || {
+        let Some(c) = weak_clock.upgrade() else { return gtk::glib::ControlFlow::Break };
         if let Ok(now) = gtk::glib::DateTime::now_local() {
             if let Ok(text) = now.format("%a, %d %b  %H:%M") {
                 c.set_label(text.as_str())
@@ -80,4 +81,5 @@ pub fn create(shell: &Rc<Shell>, monitor: &gtk::gdk::Monitor) {
     row.append(&notifications);
     window.set_child(Some(&row));
     window.present();
+    window
 }
