@@ -1,0 +1,454 @@
+"""Exercise the installed GTK file manager in a private directory and compositor."""
+
+import json
+import os
+from pathlib import Path
+import select
+import subprocess
+import time
+import tomllib
+
+
+def run(args, env, root, children, logs, ctl, wait, windows):
+    home = root / "files-home"
+    project = home / "project"
+    notes = project / "notes"
+    notes.mkdir(parents=True)
+    (notes / "example.txt").write_text("Mosaic fixture\n")
+    (notes / "move.txt").write_text("Move fixture\n")
+    desktop_id = "org.mosaic.Files.desktop"
+    ctl("pin", desktop_id)
+    wait(lambda: desktop_id in tomllib.loads(ctl("config", "get").stdout)["pins"])
+    ctl("unpin", desktop_id)
+    files_env = dict(env, HOME=str(home))
+    if args.mime_data:
+        files_env["XDG_DATA_DIRS"] += ":" + args.mime_data
+    pointer = subprocess.Popen([args.pointer, "1280", "720"], env=env, stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, text=True)
+    children.append(pointer)
+    log = (root / "mosaic-files.log").open("w+")
+    logs.append(log)
+    app = subprocess.Popen([args.files, notes.as_uri()], env=files_env, stdout=log, stderr=log)
+    children.append(app)
+
+    def active_window():
+        return next((window for window in windows() if window[3] == "true"), None)
+
+    def send(*keys):
+        subprocess.run([args.wtype, "-s", "100", *keys], env=env, check=True, timeout=5)
+
+    def control(key):
+        send("-M", "ctrl", "-s", "100", "-k", key, "-s", "100", "-m", "ctrl")
+
+    def pointer_command(command):
+        pointer.stdin.write(command + "\n")
+        pointer.stdin.flush()
+        assert select.select([pointer.stdout], [], [], 3)[0]
+        assert pointer.stdout.readline().strip() == "ok"
+
+    def click(x, y, button=272, settle=0):
+        pointer_command(f"move {x} {y}")
+        if settle:
+            time.sleep(settle)
+        pointer_command(f"button {button} 1")
+        pointer_command(f"button {button} 0")
+
+    def create_folder(parent, name):
+        # Navigation and the toolbar remain asynchronous even for local directories.
+        time.sleep(.3)
+        click(390, 188)
+        time.sleep(.25)
+        send("-d", "12", name, "-s", "110", "-k", "Return")
+        try:
+            wait(lambda: (parent / name).is_dir())
+        except TimeoutError as error:
+            names = sorted(str(path.relative_to(home)) for path in home.rglob("*"))
+            raise AssertionError(f"Failed to create {name}, files: {names}, windows: {windows()}") from error
+        wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+        # GIO reports creation on disk before its completion callback starts the refresh.
+        time.sleep(.3)
+
+    def open_folder(folder):
+        subprocess.run([args.files, folder.as_uri()], env=files_env, check=True, timeout=5)
+        time.sleep(.45)
+
+    def preview(name):
+        if args.grim:
+            subprocess.run([args.grim, "-o", "HEADLESS-1", str(Path(args.report).with_name(name))],
+                           env=env, check=True, timeout=5)
+
+    main_window = wait(lambda: (active := active_window()) and active[2] == '"org.mosaic.Files"' and active)
+    new_source, new_target, marquee_table, marquee_grid = (
+        home / name for name in ("new-source", "new-target", "marquee-table", "marquee-grid")
+    )
+    for folder in (new_source, new_target, marquee_table, marquee_grid):
+        folder.mkdir()
+
+    def name_new(parent, name):
+        wait(lambda: (active := active_window()) and active[:2] != main_window[:2])
+        send("-d", "12", name, "-s", "100", "-k", "Return")
+        wait(lambda: (parent / name).exists())
+        time.sleep(.35)
+
+    open_folder(new_source)
+    click(684, 414, 273)
+    time.sleep(.3)
+    preview("preview-files-create-menu.png")
+    click(684, 436, settle=.2)
+    name_new(new_source, "ready.txt")
+    assert (new_source / "ready.txt").read_bytes() == b""
+    # The newly created file should already be selected when Copy is clicked.
+    click(611, 195)
+    open_folder(new_target)
+    click(655, 195)
+    wait(lambda: (new_target / "ready.txt").is_file())
+    time.sleep(.3)
+    control("w")
+    time.sleep(.3)
+
+    click(684, 414, 273)
+    time.sleep(.3)
+    click(684, 466, settle=.2)
+    name_new(new_source, "a-folder")
+    assert (new_source / "a-folder").is_dir()
+
+    open_folder(new_source / "a-folder")
+    click(684, 414, 273)
+    time.sleep(.3)
+    preview("preview-files-create-in-folder.png")
+    click(684, 436, settle=.2)
+    name_new(new_source / "a-folder", "inside.txt")
+    control("w")
+    time.sleep(.3)
+
+    def drag(points):
+        x, y = points[0]
+        pointer_command(f"move {x} {y}")
+        time.sleep(.15)
+        pointer_command("button 272 1")
+        for x, y in points[1:]:
+            pointer_command(f"move {x} {y}")
+            time.sleep(.07)
+
+    drag([(624, 420), (597, 395), (535, 337), (470, 287), (392, 248)])
+    preview("preview-files-marquee-table.png")
+    pointer_command("button 272 0")
+    click(611, 195)
+    open_folder(marquee_table)
+    click(655, 195)
+    wait(lambda: (marquee_table / "ready.txt").is_file()
+         and (marquee_table / "a-folder/inside.txt").is_file())
+    time.sleep(.3)
+    control("w")
+    time.sleep(.3)
+    control("2")
+    time.sleep(.3)
+    drag([(670, 420), (645, 390), (575, 345), (490, 290), (372, 235)])
+    preview("preview-files-marquee-grid.png")
+    pointer_command("button 272 0")
+    click(611, 195)
+    open_folder(marquee_grid)
+    click(655, 195)
+    wait(lambda: (marquee_grid / "ready.txt").is_file()
+         and (marquee_grid / "a-folder/inside.txt").is_file())
+    time.sleep(.3)
+    control("w")
+    time.sleep(.3)
+    control("w")
+
+    time.sleep(.5)
+    preview("preview-files-breadcrumbs.png")
+    click(954, 147)
+    create_folder(project, "breadcrumb-target")
+    send("-M", "alt", "-k", "Left", "-m", "alt")
+    time.sleep(.35)
+    control("l")
+    send("unsubmitted", "-k", "Escape")
+    create_folder(notes, "address-cancelled")
+    (notes / "address-cancelled").rmdir()
+    (project / "breadcrumb-target").rmdir()
+    send("-k", "F5")
+
+    context_source = home / "context-source"
+    context_folder = context_source / "a-folder"
+    context_folder.mkdir(parents=True)
+    (context_source / "one.txt").write_text("Context fixture")
+    open_folder(context_source)
+    click(806, 264, 273, settle=.2)
+    time.sleep(.3)
+    preview("preview-files-context.png")
+    click(806, 285, settle=.2)
+    create_folder(context_folder, "context-opened")
+    send("-M", "alt", "-k", "Left", "-m", "alt")
+    time.sleep(.4)
+    control("2")
+    time.sleep(.26)
+    click(570, 266, 273, settle=.2)
+    time.sleep(.3)
+    preview("preview-files-grid-context.png")
+    click(570, 506, settle=.2)
+    wait(lambda: (active := active_window()) and active[:2] != main_window[:2])
+    preview("preview-files-properties.png")
+    send("-k", "Escape")
+    wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+    control("1")
+    time.sleep(.3)
+    click(806, 264, 273, settle=.2)
+    time.sleep(.3)
+    preview("preview-files-copy-path.png")
+    click(806, 391, settle=.2)
+    control("l")
+    control("v")
+    send("-k", "Return")
+    create_folder(context_folder, "clipboard-path-opened")
+    control("w")
+    time.sleep(.35)
+
+    view_source, view_a, view_b, view_c = (home / name for name in ("view-source", "view-a", "view-b", "view-c"))
+    for folder in (view_source, view_a, view_b, view_c):
+        folder.mkdir()
+    for name, data in (("z-tiny.txt", "x"), ("middle.txt", "12345"), ("a-large.txt", "1234567890")):
+        (view_source / name).write_text(data)
+
+    open_folder(view_source)
+    click(931, 228)
+    time.sleep(.25)
+    click(420, 264)
+    control("2")
+    time.sleep(.3)
+    if args.grim:
+        subprocess.run([args.grim, "-o", "HEADLESS-1", str(Path(args.report).with_name("preview-files-grid.png"))],
+                       env=env, check=True, timeout=5)
+    click(611, 188)
+    open_folder(view_a)
+    control("1")
+    time.sleep(.22)
+    click(655, 188)
+    wait(lambda: (view_a / "z-tiny.txt").is_file())
+    time.sleep(.35)
+    control("w")
+    time.sleep(.3)
+    click(570, 265)
+    click(611, 188)
+    open_folder(view_b)
+    click(655, 188)
+    try:
+        wait(lambda: (view_b / "middle.txt").is_file())
+    except TimeoutError as error:
+        raise AssertionError(f"Second tile should contain middle.txt, copied {list(view_b.iterdir())}") from error
+    time.sleep(.35)
+    control("w")
+    time.sleep(.3)
+    control("1")
+    time.sleep(.3)
+    click(420, 366)
+    click(611, 188)
+    open_folder(view_c)
+    click(655, 188)
+    wait(lambda: (view_c / "a-large.txt").is_file())
+    time.sleep(.35)
+    control("w")
+    time.sleep(.3)
+    nested = view_source / "nested"
+    nested.mkdir()
+    send("-k", "F5")
+    control("2")
+    time.sleep(.35)
+    click(420, 266)
+    send("-k", "Return")
+    create_folder(nested, "opened-from-grid")
+    control("w")
+
+    # Let the initial asynchronous URI lookup populate the toolbar.
+    time.sleep(.4)
+    click(931, 228)  # The smaller file now precedes example.txt.
+    time.sleep(.25)
+    if args.grim:
+        subprocess.run([args.grim, "-o", "HEADLESS-1", str(Path(args.report).with_name("preview-files-sort.png"))],
+                       env=env, check=True, timeout=5)
+    for y, name, moved in [
+        (264, "move.txt", True),
+        (264, "example.txt", False),
+    ]:
+        click(420, y)
+        if moved:
+            click(567, 188)
+        else:
+            control("c")
+        send("-M", "ctrl", "-k", "t", "-m", "ctrl",
+             "-s", "220", "-M", "alt", "-k", "Up", "-m", "alt")
+        time.sleep(.4)
+        if moved:
+            click(655, 188)
+        else:
+            click(420, 264)
+            control("v")
+        try:
+            wait(lambda: (project / name).is_file())
+        except TimeoutError as error:
+            names = sorted(str(path.relative_to(home)) for path in home.rglob("*"))
+            raise AssertionError(f"Failed to transfer {name}, files: {names}") from error
+        assert (project / name).read_text() == ("Move fixture\n" if moved else "Mosaic fixture\n")
+        assert (notes / name).exists() != moved
+        time.sleep(.3)
+        if not moved:
+            click(655, 188)
+            wait(lambda: (active := active_window()) and active[:2] != main_window[:2])
+            send("-k", "Escape")
+            wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+            assert set(project.glob("example*")) == {project / name}
+            time.sleep(.3)
+            click(655, 188)
+            wait(lambda: (active := active_window()) and active[:2] != main_window[:2])
+            send("-k", "Tab", "-s", "120", "-k", "Return")
+            duplicate = project / "example — копия.txt"
+            wait(duplicate.is_file)
+            assert (project / name).read_text() == duplicate.read_text() == "Mosaic fixture\n"
+            time.sleep(.3)
+        send("-M", "ctrl", "-k", "w", "-m", "ctrl")
+        time.sleep(.3)
+
+    create_folder(notes, "uri-opened")
+    send("-M", "ctrl", "-k", "t", "-m", "ctrl",
+         "-s", "180", "-M", "alt", "-k", "Up", "-m", "alt")
+    create_folder(project, "parent-opened")
+    send("-M", "alt", "-k", "Left", "-m", "alt")
+    create_folder(notes, "back-opened")
+    send("-M", "alt", "-k", "Right", "-m", "alt")
+    create_folder(project, "forward-opened")
+    control("l")
+    send("-d", "12", str(home), "-s", "100", "-k", "Return")
+    create_folder(home, "address-opened")
+    send("-M", "ctrl", "-k", "w", "-m", "ctrl")
+    create_folder(notes, "original-tab")
+
+    if args.grim:
+        time.sleep(.25)
+        subprocess.run([args.grim, "-o", "HEADLESS-1", str(Path(args.report).with_name("preview-files.png"))],
+                       env=env, check=True, timeout=5)
+
+    source, copies, destination = (home / name for name in ("group-source", "group-copy", "group-move"))
+    for folder in (source, copies, destination):
+        folder.mkdir()
+    first, conflict, last = ("a-first.txt", "b-conflict.txt", "z-last.txt")
+    for name in (first, conflict, last):
+        (source / name).write_text(name)
+    (destination / conflict).write_text("existing")
+
+    def modified_click(modifier, y):
+        hold = subprocess.Popen(
+            [args.wtype, "-M", modifier, "-s", "650", "-m", modifier],
+            env=env,
+        )
+        children.append(hold)
+        time.sleep(.26)
+        click(420, y)
+        assert hold.wait(timeout=4) == 0
+
+    open_folder(source)
+    click(420, 264)
+    modified_click("shift", 366)
+    if args.grim:
+        subprocess.run([args.grim, "-o", "HEADLESS-1", str(Path(args.report).with_name("preview-files-group.png"))],
+                       env=env, check=True, timeout=5)
+    modified_click("ctrl", 315)
+    click(420, 264, 273)
+    time.sleep(.3)
+    click(420, 361, settle=.2)
+    open_folder(copies)
+    click(655, 188)
+    wait(lambda: (copies / first).is_file() and (copies / last).is_file())
+    assert not (copies / conflict).exists()
+
+    # The copies are test files in the private home and data directories.
+    time.sleep(.33)
+    click(420, 264)
+    control("a")
+    click(479, 188)
+    wait(lambda: (active := active_window()) and active[:2] != main_window[:2])
+    send("-k", "Escape")
+    wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+    assert all((copies / name).exists() for name in (first, last))
+    click(479, 188)
+    wait(lambda: (active := active_window()) and active[:2] != main_window[:2])
+    send("-k", "Tab", "-s", "120", "-k", "Return")
+    wait(lambda: not any((copies / name).exists() for name in (first, last)))
+
+    open_folder(source)
+    click(420, 264)
+    control("a")
+    control("x")
+    open_folder(destination)
+    click(655, 188)
+    wait(lambda: (destination / first).is_file())
+    wait(lambda: (active := active_window()) and active[:2] != main_window[:2])
+    send("-k", "Escape")
+    wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+    assert (destination / conflict).read_text() == "existing"
+    assert not (source / first).exists()
+    assert all((source / name).is_file() for name in (conflict, last))
+    (source / first).write_text("recreated after the move")
+    (destination / conflict).unlink()
+    time.sleep(.35)
+    click(655, 188)
+    wait(lambda: all((destination / name).is_file() for name in (first, conflict, last)))
+    assert list(source.iterdir()) == [source / first]
+    assert (source / first).read_text() == "recreated after the move"
+    assert (destination / first).read_text() == first
+
+    open_folder(notes)
+    control("d")
+    bookmarks = Path(files_env["XDG_CONFIG_HOME"]) / "mosaic-files/bookmarks.toml"
+    wait(lambda: bookmarks.exists() and str(notes) in tomllib.loads(bookmarks.read_text())["folders"])
+    preview("preview-files-bookmarks.png")
+
+    denied = home / "protected-fixture"
+    denied.mkdir()
+    denied.chmod(0)
+    try:
+        if not os.access(denied, os.R_OK | os.X_OK):
+            open_folder(denied)
+            wait(lambda: (active := active_window()) and active[:2] != main_window[:2])
+            preview("preview-files-access-denied.png")
+            send("-k", "Escape")
+            wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+    finally:
+        denied.chmod(0o700)
+
+    sensitive = "private-path-test-fixture"
+    subprocess.run([args.files, str(notes / sensitive)], env=files_env, check=True, timeout=5)
+    wait(lambda: '\tfiles\topen_directory_failed\t' in ctl("logs").stdout)
+    assert sensitive not in ctl("logs").stdout
+    ctl("window", "close", *main_window[:2])
+    assert app.wait(timeout=5) == 0
+    app = subprocess.Popen([args.files, notes.as_uri()], env=files_env, stdout=log, stderr=log)
+    children.append(app)
+    restored_window = wait(lambda: (active := active_window()) and active[2] == '"org.mosaic.Files"' and active)
+    time.sleep(.4)
+    control("d")
+    wait(lambda: not tomllib.loads(bookmarks.read_text())["folders"])
+    ctl("window", "close", *restored_window[:2])
+    assert app.wait(timeout=5) == 0
+    pointer.stdin.write("quit\n")
+    pointer.stdin.flush()
+    assert pointer.wait(timeout=5) == 0
+    log.flush()
+    log.seek(0)
+    stderr = log.read()
+    assert not any(marker in stderr for marker in ("Gtk-CRITICAL", "GLib-CRITICAL", "panicked at")), stderr
+    result = {"passed": True, "uri_open": True, "new_folder": True,
+              "parent_back_forward_address": True, "independent_tabs": True, "dock_registration": True,
+              "copy_and_move_between_tabs": True, "conflict_cancel_and_keep_both": True,
+              "sorted_selection_matches_file": True, "private_directory_error_in_journal": True,
+              "shift_range_ctrl_toggle_and_group_copy": True, "group_trash_confirmed": True,
+              "partial_move_resumes_without_repeating": True,
+              "grid_keeps_selection_and_sort": True, "view_mode_is_per_tab": True,
+              "folder_activation_in_grid": True, "breadcrumb_parent_and_cancelled_edit": True,
+              "table_context_opens_folder": True, "grid_context_file_properties": True,
+              "context_path_clipboard": True, "context_keeps_selected_group": True,
+              "empty_folder_context_creation_and_selection": True, "create_inside_nested_folder": True,
+              "table_and_grid_marquee_select_mixed_entries": True,
+              "bookmarks_survive_restart_and_toggle_off": True,
+              "access_denied_offer_cancelled": not os.geteuid() == 0}
+    Path(args.report).with_name("files.json").write_text(json.dumps(result, indent=2) + "\n")
+    print(json.dumps(result), flush=True)

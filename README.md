@@ -1,25 +1,32 @@
 # VibeShell
 
-Rust/GTK4 desktop shell for Labwc and NixOS, continued from Mosaic Shell.
+Оболочка Mosaic для Wayland-сессии Labwc. Включает верхнюю панель, Dock,
+переключатель окон, проводник и настройки звука, сети, Bluetooth и питания.
 
-Current source version: **0.2.1**. Dock, panel, application launcher, window integration and experimental notifications are implemented. The full 1.0 specification is still in progress.
+## Сборка и запуск
 
-## Build and run
+В NixOS x86_64 с включёнными flakes выполните из корня репозитория:
 
 ```sh
-nix build
-./result/bin/shellctl doctor
-./result/bin/mosaic-shell
+nix build . --no-write-lock-file --max-jobs 1 --cores 2
+./result/bin/mosaic-session
 ```
 
-Run inside your Labwc session as its normal user, without sudo/root.
+Запускайте оболочку обычным пользователем внутри сессии Labwc.
 
-CI builds x86_64 NixOS binaries and exports the complete runtime closure. Download the artifact from GitHub Actions and run `bash install.sh`. Tags `v*` create a draft release. Tests are temporarily disabled at the owner's request.
+- [Руководство Mosaic](README.ru.md)
+- [Настройка NixOS и дополнительные службы](docs/nixos-requirements.ru.md)
+- [Техническое задание](docs/spec.ru.md)
 
-- [CI/CD and artifacts](docs/CI-CD.md)
-- [Dock 0.2 features and limits](docs/dock-0.2.md)
-- [Project status](STATUS.md)
-- [Approved specification (Russian)](docs/specs/shell-spec-ru.md)
-- [Original application documentation](docs/Mosaic-0.2-README.md)
+## GitHub Actions
 
-A successful build does not validate graphical behavior on your compositor/GPU.
+[Сборка](https://github.com/cazmusw/VibeShell/actions/workflows/build.yml)
+запускается при push, в pull request и вручную. Успешный запуск сохраняет
+архив с пакетом NixOS x86_64, всеми его runtime-зависимостями и SHA-256.
+Скачайте и распакуйте артефакт, затем выполните `bash install.sh`.
+Скрипт проверит контрольные суммы и напечатает точную команду запуска.
+
+Тег `v*` запускает сборку и создаёт черновик GitHub Release с этими же
+файлами. Черновик можно опубликовать после проверки.
+
+[Лицензия MIT](LICENSE)

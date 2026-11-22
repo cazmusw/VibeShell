@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Install the Mosaic thumbnail switcher in the user's Labwc configuration."""
+
+import argparse
+import os
+from pathlib import Path
+import stat
+import sys
+import tempfile
+import xml.etree.ElementTree as ET
+
+
+MODIFIERS = {"a": "alt", "mod1": "alt", "alt": "alt", "s": "shift", "shift": "shift"}
+
+
+def is_switcher_key(key):
+    *modifiers, name = key.lower().split("-")
+    return name == "tab" and {MODIFIERS.get(modifier, modifier) for modifier in modifiers} in (
+        {"alt"}, {"alt", "shift"},
+    )
+
+
+def configure(data):
+    parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=True, insert_pis=True))
+    root = ET.fromstring(data, parser=parser)
+    if root.tag.rsplit("}", 1)[-1].lower() not in {"labwc_config", "openbox_config"}:
+        raise ValueError("ожидался корневой элемент labwc_config или openbox_config")
+    namespace = root.tag.partition("}")[0][1:] if root.tag.startswith("{") else ""
+    if namespace:
+        ET.register_namespace("", namespace)
+
+    def tag(name):
+        return f"{{{namespace}}}{name}" if namespace else name
+
+    def child(parent, name):
+        matches = parent.findall(tag(name))
+        return matches[-1] if matches else ET.SubElement(parent, tag(name))
+
+    keyboards = root.findall(tag("keyboard"))
+    keyboard = child(root, "keyboard")
+    had_bindings = any(section.findall(tag("keybind")) for section in keyboards)
+    had_default = any(section.find(tag("default")) is not None for section in keyboards)
+    if not had_bindings and not had_default:
+        ET.SubElement(keyboard, tag("default"))
+    for section in (keyboards or [keyboard]):
+        for binding in section.findall(tag("keybind")):
+            if is_switcher_key(binding.get("key", "")):
+                section.remove(binding)
+    for key, action in (("A-Tab", "NextWindow"), ("A-S-Tab", "PreviousWindow")):
+        binding = ET.SubElement(keyboard, tag("keybind"), key=key)
+        ET.SubElement(binding, tag("action"), name=action)
+
+    switcher = child(root, "windowSwitcher")
+    switcher.attrib.update(preview="no", outlines="no", order="focus")
+    osd = child(switcher, "osd")
+    osd.attrib.update(show="yes", style="thumbnail", output="focused")
+    if "thumbnailLabelFormat" not in osd.attrib:
+        osd.set("thumbnailLabelFormat", "%T")
+
+    ET.indent(root)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True) + b"\n"
+
+
+def write_temporary(directory, prefix, data, mode):
+    fd, name = tempfile.mkstemp(dir=directory, prefix=prefix)
+    path = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as file:
+            file.write(data)
+            os.fchmod(file.fileno(), mode)
+            file.flush()
+            os.fsync(file.fileno())
+    except BaseException:
+        path.unlink()
+        raise
+    return path
+
+
+def install(path, before, after):
+    if path.is_symlink():
+        raise ValueError("rc.xml — управляемая ссылка. Примените вывод команды в своём источнике конфигурации")
+    exists = path.exists()
+    if exists and path.read_bytes() != before:
+        raise ValueError("rc.xml изменился. Повторите команду")
+    if exists and before == after:
+        return None
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = stat.S_IMODE(path.stat().st_mode) if exists else 0o600
+    pending = write_temporary(path.parent, ".mosaic-alt-tab-", after, mode)
+    backup = None
+    try:
+        if exists:
+            backup = write_temporary(path.parent, f"{path.name}.mosaic-backup-", before, 0o600)
+            if path.is_symlink() or path.read_bytes() != before:
+                raise ValueError("rc.xml изменился. Повторите команду")
+            os.replace(pending, path)
+        else:
+            os.link(pending, path)
+    finally:
+        pending.unlink(missing_ok=True)
+    return backup
+
+
+def default_config():
+    directory = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return directory / "labwc/rc.xml"
+
+
+def base_config(path, use_system_defaults):
+    if path.exists():
+        return path.read_bytes()
+    if use_system_defaults:
+        for directory in (os.environ.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":"):
+            if directory and Path(directory).is_absolute():
+                inherited = Path(directory) / "labwc/rc.xml"
+                if inherited.is_file():
+                    return inherited.read_bytes()
+    return b"<labwc_config/>"
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Сетка миниатюр Alt+Tab в Labwc")
+    parser.add_argument("--config", type=Path, help="путь к rc.xml")
+    parser.add_argument("--apply", action="store_true", help="записать файл с резервной копией")
+    args = parser.parse_args()
+    path = args.config or default_config()
+    try:
+        before = base_config(path, not args.config)
+        after = configure(before)
+        if not args.apply:
+            sys.stdout.buffer.write(after)
+            return 0
+        backup = install(path, before, after)
+        print(f"Конфигурация Labwc — {path}")
+        if backup is not None:
+            print(f"Резервная копия — {backup}")
+        return 0
+    except (OSError, ValueError, ET.ParseError) as error:
+        print(f"mosaic-alt-tab: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

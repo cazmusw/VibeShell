@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Mosaic Files
+Name[ru]=Файлы Mosaic
+Comment=Browse files and folders
+Comment[ru]=Просмотр файлов и папок
+Exec=mosaic-files %U
+Icon=folder
+Categories=System;FileTools;FileManager;
+MimeType=inode/directory;
+Terminal=false

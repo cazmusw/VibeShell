@@ -1,35 +1,48 @@
 #!/bin/sh
-# Launch instead of labwc, with Home Manager's start-target in labwc/autostart.
-# One Labwc graphical session per user is supported.
-set -eu
-if ! command -v labwc >/dev/null 2>&1; then
-    echo 'mosaic-session: labwc not found' >&2
-    exit 1
+# Manual diagnostic session; owns only the two child PIDs it starts.
+base=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+share=$base/share
+if [ ! -d "$share/applications" ]; then
+    share=$base/../share
 fi
-if ! systemctl --user show-environment >/dev/null 2>&1; then
-    echo 'mosaic-session: systemd user manager unavailable' >&2
-    exit 1
+if [ -f "$share/applications/org.mosaic.Files.desktop" ]; then
+    XDG_DATA_DIRS="$share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+    PATH="$base:$PATH"
+    export XDG_DATA_DIRS PATH
 fi
-if systemctl --user is-active --quiet mosaic-session.target; then
-    echo 'mosaic-session: another managed session is already running' >&2
-    exit 1
-fi
-export XDG_CURRENT_DESKTOP="labwc"
-child=
-cleanup() {
-    systemctl --user stop mosaic-session.target || true
-    dbus-update-activation-environment --systemd WAYLAND_DISPLAY= DISPLAY= XDG_CURRENT_DESKTOP= || true
-    systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP || true
+setsid=setsid
+record_session() {
+    if [ -x "$base/shellctl" ]; then
+        "$base/shellctl" __session-event "$1" "$2" >/dev/null 2>&1 || :
+    fi
 }
-terminate() {
-    if test -n "$child"; then kill -TERM "$child" 2>/dev/null || true; fi
+if ! command -v "$setsid" >/dev/null 2>&1; then
+    record_session launcher_failed 1
+    printf '%s\n' 'mosaic-session: setsid is required' >&2
+    exit 1
+fi
+# Keep both child PIDs as direct targets for cleanup and leave the
+# terminal foreground process group to the runner alone.
+set +m
+backend=
+ui=
+cleanup() {
+    status=$?
+    trap - EXIT HUP INT TERM
+    if [ -n "$ui" ]; then kill "$ui" 2>/dev/null || :; wait "$ui" 2>/dev/null || :; fi
+    if [ -n "$backend" ]; then kill "$backend" 2>/dev/null || :; wait "$backend" 2>/dev/null || :; fi
+    exit "$status"
 }
 trap cleanup EXIT
-trap terminate HUP INT TERM
-labwc "$@" &
-child=$!
-status=0
-wait "$child" || status=$?
-# A trapped signal can interrupt wait before the compositor exits.
-if kill -0 "$child" 2>/dev/null; then wait "$child" || status=$?; fi
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+record_session start 0
+"$setsid" "$base/mosaic-services" </dev/null &
+backend=$!
+"$setsid" "$base/mosaic-shell" </dev/null &
+ui=$!
+wait "$ui"
+status=$?
+ui=
+record_session ui_exit "$status"
 exit "$status"

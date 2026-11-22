@@ -14,7 +14,7 @@ if (( ${#closure[@]} == 0 )); then
     echo 'Nix returned an empty runtime closure' >&2
     exit 1
 fi
-nix-store --export "${closure[@]}" | zstd -T0 -10 -o "$destination/VibeShell-x86_64-linux.nix-export.zst"
+nix-store --export "${closure[@]}" | zstd -T2 -10 -o "$destination/VibeShell-x86_64-linux.nix-export.zst"
 printf '%s\n' "$package" > "$destination/package-path.txt"
 cat > "$destination/install.sh" <<'INSTALL'
 #!/usr/bin/env bash
@@ -46,8 +46,7 @@ The package-path.txt file records the executable's exact immutable store path.
 Keep a Nix GC root or install that path into a profile if you want to retain it
 across garbage collection. The script does not modify your session or config.
 
-Tests were intentionally disabled. A successful CI build is not proof of
-working input, window management or rendering on your compositor/GPU.
+Test the graphical session on your own compositor and GPU.
 README
 (
     cd -- "$destination"

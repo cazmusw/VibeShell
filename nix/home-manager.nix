@@ -1,55 +1,53 @@
-flake: { config, lib, pkgs, ... }:
+{ config, lib, pkgs, defaultPackage }:
 let
   cfg = config.programs.mosaic-shell;
-  toml = pkgs.formats.toml { };
-  settings = cfg.settings // { mode = cfg.configurationMode; schema_version = 1; };
+  format = pkgs.formats.toml {};
+  unit = {
+    PartOf = [ "mosaic-session.target" ];
+    BindsTo = [ "mosaic-session.target" ];
+    After = [ "graphical-session.target" ];
+    StartLimitIntervalSec = 30;
+    StartLimitBurst = 3;
+  };
 in {
   options.programs.mosaic-shell = {
-    enable = lib.mkEnableOption "experimental Mosaic shell";
-    package = lib.mkOption { type = lib.types.package; default = flake.packages.${pkgs.stdenv.hostPlatform.system}.default; };
-    settings = lib.mkOption { type = toml.type; default = { }; description = "Initial supported schema: theme, reduced_motion, dock, panel."; };
-    configurationMode = lib.mkOption { type = lib.types.enum [ "strict" "defaults" ]; default = "strict"; };
-    enableLabwcBindings = lib.mkOption { type = lib.types.bool; default = false; description = "Install example bindings, without replacing labwc rc.xml."; };
-    notifications.enable = lib.mkOption { type = lib.types.bool; default = false; description = "Opt into the experimental notification server; disable other servers first."; };
+    enable = lib.mkEnableOption "Mosaic shell vertical slice for a UWSM graphical session";
+    package = lib.mkOption { type = lib.types.package; default = defaultPackage; };
+    bluetoothPairing.enable = lib.mkEnableOption "the Mosaic Bluetooth pairing agent";
+    settings = lib.mkOption {
+      type = lib.types.nullOr (lib.types.attrsOf lib.types.anything);
+      default = null;
+      description = "Schema 2: pins, theme, dock, general, panel. Declared configuration is read-only; null allows editing in the GUI.";
+    };
   };
   config = lib.mkIf cfg.enable {
-    home.packages = [ cfg.package pkgs.labwc ];
-    xdg.configFile."mosaic-shell/config.toml".source = toml.generate "mosaic-shell-config" settings;
-    xdg.configFile."mosaic-shell/labwc-keybindings.xml" = lib.mkIf cfg.enableLabwcBindings {
-      text = ''
-        <!-- Copy inside your existing <keyboard>; this file is not loaded automatically. -->
-        <keybind key="W-space"><action name="Execute" command="${cfg.package}/bin/shellctl launcher" /></keybind>
-        <keybind key="W-a"><action name="Execute" command="${cfg.package}/bin/shellctl applications" /></keybind>
-        <keybind key="W-comma"><action name="Execute" command="${cfg.package}/bin/shellctl settings" /></keybind>
-        <keybind key="W-Escape"><action name="Execute" command="${cfg.package}/bin/shellctl dock show" /></keybind>
-        <keybind key="W-n"><action name="Execute" command="${cfg.package}/bin/shellctl notifications" /></keybind>
-      '';
+    home.packages = [ cfg.package ];
+    xdg.configFile = lib.mkIf (cfg.settings != null) {
+      "mosaic-shell/config.toml".source = format.generate "mosaic-config.toml"
+        ({ schema_version = 2; revision = 0; pins = []; } // cfg.settings);
     };
-    systemd.user.targets.mosaic-session.Unit = { Description = "Mosaic Labwc session"; StopWhenUnneeded = false; };
+    systemd.user.targets.mosaic-session = {
+      Unit = {
+        Description = "Mosaic shell graphical session";
+        BindsTo = [ "graphical-session.target" ];
+        After = [ "graphical-session.target" ];
+      };
+      Install.WantedBy = [ "graphical-session.target" ];
+    };
+    systemd.user.services.mosaic-services = {
+      Unit = unit // { Description = "Mosaic shell backend"; };
+      Service = {
+        ExecStart = "${cfg.package}/bin/mosaic-services";
+        Restart = "on-failure";
+        RestartSec = 1;
+        Environment = lib.optional cfg.bluetoothPairing.enable "MOSAIC_BLUETOOTH_PAIRING=1";
+      };
+      Install.WantedBy = [ "mosaic-session.target" ];
+    };
     systemd.user.services.mosaic-shell = {
-      Unit = { Description = "Mosaic desktop UI"; PartOf = [ "mosaic-session.target" ]; After = [ "mosaic-services.service" ]; StartLimitBurst = 3; StartLimitIntervalSec = 30; };
+      Unit = unit // { Description = "Mosaic panel and Dock"; Wants = [ "mosaic-services.service" ]; After = unit.After ++ [ "mosaic-services.service" ]; };
       Service = { ExecStart = "${cfg.package}/bin/mosaic-shell"; Restart = "on-failure"; RestartSec = 1; };
       Install.WantedBy = [ "mosaic-session.target" ];
-    };
-    systemd.user.services.mosaic-services = lib.mkIf cfg.notifications.enable {
-      Unit = { Description = "Mosaic experimental notification service"; PartOf = [ "mosaic-session.target" ]; StartLimitBurst = 3; StartLimitIntervalSec = 30; };
-      Service = { ExecStart = "${cfg.package}/bin/mosaic-services"; Restart = "on-failure"; RestartSec = 1; };
-      Install.WantedBy = [ "mosaic-session.target" ];
-    };
-    # Starts the target only after Labwc sets WAYLAND_DISPLAY. No automatic start outside a session.
-    xdg.configFile."mosaic-shell/start-target" = {
-      executable = true;
-      text = ''
-        #!${pkgs.runtimeShell}
-        set -eu
-        test -n "''${WAYLAND_DISPLAY:-}"
-        export DISPLAY="''${DISPLAY:-}"
-        export XDG_CURRENT_DESKTOP="''${XDG_CURRENT_DESKTOP:-labwc}"
-        ${pkgs.systemd}/bin/systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP
-        ${pkgs.systemd}/bin/systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP
-        ${pkgs.dbus}/bin/dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP
-        ${pkgs.systemd}/bin/systemctl --user start mosaic-session.target
-      '';
     };
   };
 }

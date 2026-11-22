@@ -1,16 +1,73 @@
-window { background: transparent; color: @ink; }
-.panel { background: @surface; padding: 0 12px; border-bottom: 1px solid @edge; }
-.panel button { background: transparent; border: none; min-height: 22px; padding: 0 8px; color: @ink; }
-.dock { background: @surface; padding: 10px 10px 4px; border: 1px solid @edge; border-radius: 18px; }
-.dock-icon { background: transparent; border: none; border-radius: 12px; padding: 4px 6px 0; color: @ink; }
-.dock-icon:hover, .dock-icon.active { background: alpha(#8fa7ed, 0.20); }
-.indicator { font-size: 12px; min-height: 12px; }
-.launcher, .settings { background: @surface; padding: 24px; border: 1px solid @edge; border-radius: 16px; color: @ink; }
-.results { background: transparent; color: @ink; }
-.results row { padding: 4px 12px; border-radius: 10px; }
-.title { font-size: 22px; font-weight: bold; }
-.notification { padding: 12px; border: 1px solid @edge; border-radius: 10px; }
-button:focus-visible, entry:focus-visible { outline: 2px solid #8fa7ed; outline-offset: 2px; }
-popover contents { background: @surface; color: @ink; border: 1px solid @edge; border-radius: 12px; padding: 8px; }
+window.mosaic-panel { background: #171b24; color: #f3f5fa; }
+window.mosaic-dock { background: transparent; }
+.dock-surface { background: #222936; border: 1px solid #536076; border-radius: 18px; padding: 8px; }
+.dock-item { background: transparent; border: 1px solid transparent; padding: 4px; min-width: 48px; }
+.dock-item.active { border-color: #80b8ff; background: #36475e; }
+.dock-app-divider { background-color: #8997ad; opacity: .65; }
+.light .dock-app-divider { background-color: #536781; }
+.dock-item:hover, .dock-grid:hover { background: #3d495b; }
+.dock-grid { background: transparent; color: #f0f4ff; border: none; font-size: 30px; min-width: 40px; padding: 8px; }
+.dock-trash image { -gtk-icon-size: 24px; }
+.fallback-icon { background: #355c87; color: #f2f7ff; border-radius: 10px; font-weight: 600; font-size: 20px; }
+.panel-button { background: transparent; color: #f3f5fa; border: none; padding: 2px 10px; min-height: 24px; }
+.panel-button:hover { background: #36475e; }
+window.mosaic-window { background: #1d2430; color: #edf2fc; }
+.mosaic-window headerbar { background: #222a37; color: #edf2fc; border: none; }
+.mosaic-window button { background: #293445; color: #edf2fc; border: 1px solid #47556a; border-radius: 10px; padding: 8px; }
+.mosaic-window button:hover { background: #3b4c64; }
+.mosaic-window .audio-tabs button:checked,
+.mosaic-window .settings-tabs button:checked { background: #3b4c64; border-color: #80b8ff; }
+.mosaic-window headerbar button { padding: 4px; min-width: 24px; min-height: 24px; }
+.mosaic-window list, .mosaic-window row { background: transparent; color: #edf2fc; }
+.mosaic-window searchentry { background: #111924; color: #edf2fc; border: 1px solid #718bad; border-radius: 10px; }
+.mosaic-window row { margin-bottom: 4px; }
+/* Dock layout reserves zoom space outside the visible backplate. */
+.dock-surface { padding: 0; }
+.dock-trigger, .dock-scroll { background: transparent; border: none; padding: 0; min-height: 0; }
+.dock-scroll viewport { background: transparent; }
+.mosaic-popup contents { background: #222936; color: #edf2fc; border: 1px solid #536076; border-radius: 10px; padding: 6px; }
+.mosaic-popup button { background: #293445; color: #edf2fc; border-radius: 6px; padding: 8px; }
+window.mosaic-panel.light { background: #f0f3f8; color: #172438; }
+.light .panel-button { color: #172438; }
+.light .panel-button:hover { background: #d5e1f2; }
+.light .dock-surface { background: #e9eef7; border-color: #8394ac; }
+.light .dock-item.active { background: #cedff6; border-color: #3568a3; }
+.light .dock-item:hover, .light .dock-grid:hover { background: #d4dfef; }
+.light .dock-grid { color: #172438; }
+.light .fallback-icon { background: #3568a3; color: #ffffff; }
+window.mosaic-window.light { background: #eef2f8; color: #172438; }
+.mosaic-window.light headerbar { background: #dfe7f3; color: #172438; }
+.mosaic-window.light button { background: #e0e8f4; color: #172438; border-color: #8597af; }
+.mosaic-window.light button:hover { background: #cbdcf3; }
+.mosaic-window.light .audio-tabs button:checked,
+.mosaic-window.light .settings-tabs button:checked { background: #cedff6; border-color: #3568a3; }
+.mosaic-window.light list, .mosaic-window.light row { color: #172438; }
+.mosaic-window.light searchentry { background: #ffffff; color: #172438; border-color: #617b9e; }
+.light .mosaic-popup contents { background: #eef2f8; color: #172438; border-color: #8394ac; }
+.light .mosaic-popup button { background: #e0e8f4; color: #172438; }
 
-.dock-scroll { background: transparent; border: none; color: @ink; padding: 2px; min-width: 20px; }
+.tray-item { padding: 1px 4px; min-height: 24px; min-width: 24px; border-radius: 6px; }
+.tray-item.attention { background: #665023; border: 1px solid #e0b255; }
+.light .tray-item.attention { background: #fff0c8; }
+
+.mosaic-popup.dock-cards.light contents { background: #eef2f8; color: #172438; border-color: #8394ac; }
+.mosaic-popup.dock-cards.light button { background: #e0e8f4; color: #172438; border-color: #8394ac; }
+.mosaic-popup.dock-cards .dock-window-card { padding: 0; border-radius: 7px; }
+.dock-window-titlebar { padding: 5px 8px; border-bottom: 1px solid #546479; }
+.dock-window-content { min-height: 76px; padding: 8px 10px; background: #18212d; }
+.dock-window-preview { background: #18212d; }
+.dock-cards.light .dock-window-titlebar { border-bottom-color: #a6b9d3; }
+.dock-cards.light .dock-window-content { background: #f7f9fc; }
+.dock-cards.light .dock-window-preview { background: #f7f9fc; }
+
+.panel-clock > button { background: transparent; color: #f3f5fa; border: none; padding: 2px 10px; min-height: 24px; }
+.panel-clock > button:hover, .panel-clock > button:checked { background: #36475e; }
+.light .panel-clock > button { color: #172438; }
+.light .panel-clock > button:hover, .light .panel-clock > button:checked { background: #d5e1f2; }
+.panel-calendar calendar { color: #edf2fc; background: transparent; border: none; }
+.light .panel-calendar calendar { color: #172438; }
+
+.panel-tray-more > button { background: transparent; color: #f3f5fa; border: none; padding: 2px 6px; min-height: 24px; }
+.panel-tray-more > button:hover, .panel-tray-more > button:checked { background: #36475e; }
+.light .panel-tray-more > button { color: #172438; }
+.light .panel-tray-more > button:hover, .light .panel-tray-more > button:checked { background: #d5e1f2; }

@@ -1,0 +1,111 @@
+.mosaic-files .files-places {
+    padding: 18px 10px 10px;
+    background-color: alpha(currentColor, 0.05);
+    border-right: 1px solid alpha(currentColor, 0.12);
+}
+
+.mosaic-files .files-places-heading {
+    font-weight: 700;
+    padding: 0 8px 8px;
+}
+
+.mosaic-files .files-places button {
+    min-height: 33px;
+    padding: 0 8px;
+}
+
+.mosaic-files .files-places separator {
+    margin: 9px 5px;
+}
+
+.mosaic-files .files-toolbar {
+    padding: 11px 12px 6px;
+}
+
+.mosaic-files .files-address {
+    border: 1px solid alpha(currentColor, 0.22);
+    border-radius: 6px;
+    padding: 1px 4px;
+}
+
+.mosaic-files .files-address button {
+    padding-left: 7px;
+    padding-right: 7px;
+    min-height: 27px;
+}
+
+.mosaic-files .files-address .current-segment {
+    font-weight: 600;
+}
+
+.mosaic-files .files-address-separator {
+    opacity: 0.55;
+}
+
+.files-context-menu .files-context-actions {
+    min-width: 154px;
+}
+
+.files-context-menu .files-context-actions > button {
+    min-height: 26px;
+    padding: 1px 8px;
+}
+
+.files-context-menu .files-context-actions > separator {
+    margin: 4px 2px;
+}
+
+.mosaic-files .files-actions {
+    padding: 0 12px 10px;
+}
+
+.mosaic-files .files-toolbar button,
+.mosaic-files .files-actions button,
+.mosaic-files .files-tab-close {
+    padding-left: 6px;
+    padding-right: 6px;
+}
+
+.mosaic-files .files-tab-close {
+    min-width: 24px;
+    min-height: 24px;
+    padding: 0;
+}
+
+.mosaic-files .files-list .files-name,
+.mosaic-files .files-list .files-detail {
+    min-height: 34px;
+}
+
+.mosaic-files .files-grid {
+    padding: 12px;
+}
+
+.mosaic-files .files-grid > child {
+    margin: 3px;
+    border-radius: 8px;
+}
+
+.mosaic-files .files-tile {
+    min-width: 104px;
+    min-height: 84px;
+    padding: 8px 5px;
+}
+
+.mosaic-files .files-list .files-detail,
+.mosaic-files .files-status,
+.mosaic-files .files-empty {
+    opacity: 0.72;
+}
+
+.mosaic-files .files-status {
+    padding: 7px 12px;
+    border-top: 1px solid alpha(currentColor, 0.12);
+}
+
+.mosaic-files .files-notice {
+    margin: 0 12px 9px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background-color: rgba(195, 64, 55, 0.15);
+}

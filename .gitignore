@@ -1,4 +1,4 @@
-/target
-/result
-*.log
+target/
 __pycache__/
+/result*
+/dist/
