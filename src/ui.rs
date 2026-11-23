@@ -2268,8 +2268,9 @@ impl View {
                     return;
                 };
                 match app.set_as_default_for_type(mime) {
-                    Ok(()) if gio::AppInfo::default_for_type(mime, false)
-                        .is_some_and(|current| current.equal(&app)) =>
+                    Ok(())
+                        if gio::AppInfo::default_for_type(mime, false)
+                            .is_some_and(|current| current.equal(&app)) =>
                     {
                         feedback.set_text("Приложение по умолчанию обновлено");
                     }
