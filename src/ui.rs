@@ -2209,7 +2209,13 @@ impl View {
                 }
             });
             let item = gtk::ListBoxRow::new();
-            item.set_child(Some(&b));
+            let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            b.set_hexpand(true);
+            actions.append(&b);
+            if !entry.info.supported_types().is_empty() {
+                actions.append(&Self::default_application_menu(&entry.info, &entry.name));
+            }
+            item.set_child(Some(&actions));
             list.append(&item);
             rows.push((entry.name.to_lowercase(), item));
         }
@@ -2227,6 +2233,56 @@ impl View {
         body.append(&content);
         window.present();
         search.grab_focus();
+    }
+
+    fn default_application_menu(info: &gio::AppInfo, name: &str) -> gtk::MenuButton {
+        let menu = gtk::MenuButton::builder()
+            .icon_name("view-more-symbolic")
+            .valign(gtk::Align::Center)
+            .tooltip_text(format!("Назначить по умолчанию: {name}"))
+            .build();
+        let info = info.clone();
+        menu.set_create_popup_func(move |menu| {
+            let popover = gtk::Popover::new();
+            let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
+            content.append(&label("Открывать этим приложением по умолчанию"));
+
+            let mut types = info.supported_types().to_vec();
+            types.sort_unstable();
+            types.dedup();
+            let choices = gtk::StringList::new(&[]);
+            for mime in &types {
+                choices.append(mime);
+            }
+            let select = gtk::DropDown::builder().model(&choices).build();
+            select.set_enable_search(true);
+            content.append(&select);
+
+            let status = label("");
+            status.set_wrap(true);
+            let save = gtk::Button::with_label("Назначить");
+            let app = info.clone();
+            let feedback = status.clone();
+            save.connect_clicked(move |_| {
+                let Some(mime) = types.get(select.selected() as usize) else {
+                    return;
+                };
+                match app.set_as_default_for_type(mime) {
+                    Ok(()) if gio::AppInfo::default_for_type(mime, false)
+                        .is_some_and(|current| current.equal(&app)) =>
+                    {
+                        feedback.set_text("Приложение по умолчанию обновлено");
+                    }
+                    Ok(()) => feedback.set_text("Действует другая настройка для этого типа"),
+                    Err(error) => feedback.set_text(&format!("Не удалось сохранить: {error}")),
+                }
+            });
+            content.append(&save);
+            content.append(&status);
+            popover.set_child(Some(&content));
+            menu.set_popover(Some(&popover));
+        });
+        menu
     }
     fn settings_row(name: &str, widget: &impl IsA<gtk::Widget>) -> gtk::Box {
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 16);

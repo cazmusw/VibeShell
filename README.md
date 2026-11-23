@@ -17,6 +17,7 @@ nix build . --no-write-lock-file --max-jobs 1 --cores 2
 - [Руководство Mosaic](README.ru.md)
 - [Настройка NixOS и дополнительные службы](docs/nixos-requirements.ru.md)
 - [Техническое задание](docs/spec.ru.md)
+- [План разработки](docs/plan.ru.md)
 
 ## GitHub Actions
 
