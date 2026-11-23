@@ -898,27 +898,35 @@ impl View {
         match entry.info.launch(&[], context.as_ref()) {
             Ok(()) => {
                 self.close_dialog();
-                let id = entry.model.id.clone();
-                let token = self.pending.borrow_mut().start(&id);
                 self.fail("");
-                self.redraw();
-                let weak = Rc::downgrade(self);
-                glib::timeout_add_local_once(std::time::Duration::from_secs(10), move || {
-                    if let Some(v) = weak.upgrade() {
-                        let expired = v.pending.borrow_mut().expire(&id, token);
-                        if expired {
-                            crate::diagnostics::event("shell", "launcher_window_timeout", 1);
-                            v.fail("Запуск не подтверждён окном за 10 секунд");
-                            v.redraw();
-                        }
-                    }
+                let id = entry.model.id.as_str();
+                let has_window = self.windows.borrow().iter().any(|window| {
+                    desktop::match_app(&window.app_id, &self.models).as_deref() == Some(id)
                 });
+                if !has_window {
+                    self.track_launch(id);
+                }
+                self.redraw();
             }
             Err(_) => {
                 crate::diagnostics::event("shell", "launcher_failed", 1);
                 self.fail("Не удалось запустить приложение");
             }
         }
+    }
+    fn track_launch(self: &Rc<Self>, id: &str) {
+        let token = self.pending.borrow_mut().start(id);
+        let id = id.to_owned();
+        let weak = Rc::downgrade(self);
+        glib::timeout_add_local_once(Duration::from_secs(10), move || {
+            if let Some(view) = weak.upgrade() {
+                let expired = view.pending.borrow_mut().expire(&id, token);
+                if expired {
+                    crate::diagnostics::event("shell", "launcher_window_unobserved", 0);
+                    view.redraw();
+                }
+            }
+        });
     }
     fn commit(self: &Rc<Self>, next: Settings) -> Result<Settings, ApiError> {
         if self.path.is_symlink() {

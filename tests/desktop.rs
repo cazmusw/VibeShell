@@ -104,6 +104,34 @@ fn moving_an_existing_window_does_not_confirm_a_new_launch() {
     let new = newly_observed_windows(std::slice::from_ref(&old), &current);
     assert_eq!(new, vec![&current[1]]);
 }
+
+#[test]
+fn a_window_can_confirm_launch_when_its_app_id_arrives_later() {
+    let old = Window {
+        epoch: 1,
+        id: 7,
+        app_id: String::new(),
+        title: String::new(),
+        active: false,
+        minimized: false,
+        fullscreen: false,
+        outputs: vec![],
+    };
+    let mut identified = old.clone();
+    identified.app_id = "editor".into();
+    let current = [identified];
+    let applications = [Application {
+        id: "editor.desktop".into(),
+        wm_class: None,
+    }];
+    let new = newly_observed_windows(&[old], &current);
+    assert_eq!(new.len(), 1);
+    assert_eq!(
+        match_app(&new[0].app_id, &applications).as_deref(),
+        Some("editor.desktop")
+    );
+}
+
 #[test]
 fn closed_or_old_epoch_handle_is_invalid() {
     let w = Window {

@@ -107,6 +107,7 @@
           --probe ${layerProbe}/bin/layer-smoke \
           --grim ${pkgs.grim}/bin/grim \
           --screenshot $out/preview.png \
+          --launcher-check \
           --report $out/vertical.json
       '';
       menuChecks = lib.genAttrs [ "100" "125" "150" "200" ] (scale:

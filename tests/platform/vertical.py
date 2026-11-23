@@ -20,6 +20,7 @@ p.add_argument('--tray-external',action='store_true')
 p.add_argument('--overflow',action='store_true')
 p.add_argument('--calendar',action='store_true')
 p.add_argument('--control-center',action='store_true')
+p.add_argument('--launcher-check', action='store_true')
 p.add_argument('--alt-tab')
 p.add_argument('--files')
 p.add_argument('--mime-data')
@@ -77,6 +78,9 @@ with tempfile.TemporaryDirectory(prefix='mosaic-vertical-') as directory:
             '</keyboard></labwc_config>\n')
     apps=root/'share/applications';apps.mkdir(parents=True)
     (apps/'mosaic-stage-0-probe.desktop').write_text('[Desktop Entry]\nType=Application\nName=Mosaic fixture\nExec="'+a.probe+'" --hold-window\nIcon=application-x-executable\n')
+    if a.launcher_check:
+        import launcher_check
+        launcher_check.prepare(apps, root, sys.executable, a.probe)
     if a.files:
         from shutil import copyfile
         desktop = Path(__file__).resolve().parents[2] / 'assets/org.mosaic.Files.desktop'
@@ -187,7 +191,11 @@ with tempfile.TemporaryDirectory(prefix='mosaic-vertical-') as directory:
                 subprocess.run([a.grim,'-o','HEADLESS-1',a.screenshot],env=env,check=True,timeout=5)
             ctl('dialog','close')
             wait(lambda:not dialog()['mapped'])
-        ctl('launch','mosaic-stage-0-probe.desktop');w=wait(fixture)
+        if a.launcher_check:
+            launcher_check.run(ctl, wait, fixture, root)
+            w = wait(fixture)
+        else:
+            ctl('launch','mosaic-stage-0-probe.desktop');w=wait(fixture)
         epoch,ident=w[:2]
         ctl('window','minimize',epoch,ident);wait(lambda:(f:=fixture()) and f[4]=='true')
         ctl('window','activate',epoch,ident);wait(lambda:(f:=fixture()) and f[3]=='true' and f[4]=='false')
