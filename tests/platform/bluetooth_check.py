@@ -212,6 +212,18 @@ def run(args, env, children, ctl, wait, spawn):
     trusted = bus_call("org.bluez", keyboard_path, "org.freedesktop.DBus.Properties", "Get",
                        "ss", "org.bluez.Device1", "Trusted")
     assert data(trusted) == {"type": "b", "data": False}
+    fixture_call("SetConcurrentConnect", "b", "true")
+    connect_args = ("sssss", owner, adapter, keyboard_path, keyboard_address, "connect")
+    reconnect = action("ChangeBluetoothDevice", *connect_args, ok=False)
+    assert reconnect.returncode == 0, reconnect.stderr
+    assert keyboard()["connected"]
+    action("ChangeBluetoothDevice", *connect_args)
+    action("ChangeBluetoothDevice", "sssss", owner, adapter, keyboard_path,
+           keyboard_address, "disconnect")
+    fixture_call("SetConcurrentConnect", "b", "false")
+    stalled = action("ChangeBluetoothDevice", *connect_args, ok=False)
+    assert stalled.returncode and "still did not connect" in stalled.stderr, stalled.stderr
+    assert not keyboard()["connected"]
     time.sleep(.3)
     click(723, 285)  # Подключить
     wait(lambda: keyboard().get("connected"))
@@ -229,7 +241,7 @@ def run(args, env, children, ctl, wait, spawn):
     time.sleep(.3)
     click(822, 273)  # Удалить in confirmation
     wait(lambda: not keyboard())
-    assert device_counters() == [5, 3, 5, 1, 2, 2, 1, 1, 1, 0]
+    assert device_counters() == [5, 3, 5, 1, 2, 2, 2, 2, 1, 0]
     ctl("dialog", "close")
     wait(lambda: not dialog()["mapped"])
 
@@ -267,6 +279,7 @@ def run(args, env, children, ctl, wait, spawn):
         "gtk_rejection_and_pane_close_cancellation": True,
         "gtk_pairing_without_auto_connect_or_trust": True,
         "gtk_connect_disconnect_and_confirm_removal": True,
+        "concurrent_reconnect_confirmed": True, "stalled_reconnect_times_out": True,
         "opt_in_pairing_enabled": True, "incoming_agent_request_rejected": True,
     }
     Path(args.report).with_name("bluetooth.json").write_text(json.dumps(result, indent=2) + "\n")

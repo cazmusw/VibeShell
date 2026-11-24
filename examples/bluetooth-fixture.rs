@@ -43,6 +43,7 @@ struct State {
     rejections: u32,
     cancellations: u32,
     connects: u32,
+    concurrent_connect: Option<bool>,
     disconnects: u32,
     removals: u32,
     default_requests: u32,
@@ -362,6 +363,20 @@ impl Keyboard {
                 "keyboard is not paired or ready".into(),
             ));
         }
+        if let Some(completes) = state.concurrent_connect.take() {
+            if completes {
+                let shared = self.0.clone();
+                thread::spawn(move || {
+                    thread::sleep(Duration::from_millis(350));
+                    let mut state = shared.lock().unwrap();
+                    state.connected = true;
+                    state.connects += 1;
+                });
+            }
+            return Err(FixtureError::InProgress(
+                "another client is connecting".into(),
+            ));
+        }
         state.connected = true;
         state.connects += 1;
         Ok(())
@@ -391,6 +406,10 @@ impl Keyboard {
 struct TestControl(Shared);
 #[zbus::interface(name = "org.mosaic.BluetoothFixture")]
 impl TestControl {
+    fn set_concurrent_connect(&self, completes: bool) {
+        self.0.lock().unwrap().concurrent_connect = Some(completes);
+    }
+
     fn set_external_search(&self, active: bool) {
         self.0.lock().unwrap().external = active;
     }

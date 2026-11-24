@@ -1,6 +1,7 @@
 mod pairing;
 
 use crate::ipc::ApiError;
+use futures_lite::future;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
@@ -293,14 +294,50 @@ impl Service {
                 return Ok(());
             }
             let method = if connect { "Connect" } else { "Disconnect" };
-            Proxy::new(&bus, owner.as_str(), device.path.as_str(), DEVICE)
+            let reply = Proxy::new(&bus, owner.as_str(), device.path.as_str(), DEVICE)
                 .await?
                 .call_with_flags::<_, _, ()>(method, flags, &())
-                .await
+                .await;
+            if connect
+                && matches!(&reply, Err(zbus::Error::MethodError(name, _, _))
+                    if matches!(name.as_str(),
+                        "org.bluez.Error.InProgress" | "org.bluez.Error.AlreadyConnected"))
+            {
+                return self.wait_for_connection(&state_bus, &target).await;
+            }
+            reply
         };
         reply
             .map_err(bluez_error)?
             .ok_or_else(|| zbus::Error::InvalidReply.into())
+    }
+
+    async fn wait_for_connection(
+        &self,
+        state_bus: &Connection,
+        target: &DeviceTarget<'_>,
+    ) -> Result<(), ApiError> {
+        future::race(
+            async {
+                loop {
+                    let (_, adapter, device) = self.device_target(state_bus, target).await?;
+                    if !adapter.powered || !device.paired {
+                        return Err(ApiError::Conflict("Bluetooth device state changed".into()));
+                    }
+                    if device.connected {
+                        return Ok(());
+                    }
+                    async_io::Timer::after(Duration::from_millis(200)).await;
+                }
+            },
+            async {
+                async_io::Timer::after(Duration::from_secs(6)).await;
+                Err(ApiError::Timeout(
+                    "Bluetooth device still did not connect".into(),
+                ))
+            },
+        )
+        .await
     }
 
     async fn bus(&self) -> zbus::Result<Connection> {
