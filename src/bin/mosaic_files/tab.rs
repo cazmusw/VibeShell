@@ -4,7 +4,7 @@ use crate::filesystem::{
 };
 use crate::navigation::{History, Navigation};
 use crate::transfer::{self, Batch, Kind, TransferError};
-use crate::{Browser, admin, archives, photos};
+use crate::{Browser, admin, archives, photos, properties};
 use glib::translate::IntoGlib;
 use gtk::{gdk, gio, glib, pango, prelude::*};
 use std::{
@@ -706,15 +706,7 @@ impl Tab {
                     {
                         details.push_str(&format!("\nИзменён: {date}"));
                     }
-                    gtk::AlertDialog::builder()
-                        .message(format!("Свойства — {}", entry.name))
-                        .detail(details)
-                        .buttons(["Закрыть"])
-                        .cancel_button(0)
-                        .default_button(0)
-                        .modal(true)
-                        .build()
-                        .show(Some(&parent));
+                    properties::show(&parent, &entry.file, &entry.name, &details);
                 }
             }
         }

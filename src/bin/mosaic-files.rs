@@ -14,6 +14,8 @@ mod filesystem;
 mod navigation;
 #[path = "mosaic_files/photos.rs"]
 mod photos;
+#[path = "mosaic_files/properties.rs"]
+mod properties;
 #[path = "mosaic_files/tab.rs"]
 mod tab;
 #[path = "mosaic_files/transfer.rs"]

@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import select
+import stat
 import struct
 import subprocess
 import sys
@@ -669,6 +670,63 @@ def run(args, env, root, children, logs, ctl, wait, windows):
     wait(copied_entry.is_file)
     assert copied_entry.read_text() == "Packed from the context menu\n"
     wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+
+    def open_file_properties(directory):
+        open_folder(directory)
+        click(806, 264, 273, settle=.2)
+        time.sleep(.3)
+        click(806, 506, settle=.2)
+        files_modal(main_window)
+        time.sleep(.3)
+
+    def close_file_properties():
+        send("-k", "Escape")
+        wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+
+    permissions = home / "permissions"
+    permissions.mkdir()
+    editable = permissions / "owned.txt"
+    editable.write_text("Permission fixture\n")
+    editable.chmod(0o640)
+    open_file_properties(permissions)
+    send("-k", "space")
+    control("s")
+    wait(lambda: stat.S_IMODE(editable.stat().st_mode) == 0o240, seconds=4)
+    time.sleep(.25)
+    preview("preview-files-permissions.png")
+    close_file_properties()
+
+    folders = permissions / "folders"
+    folder = folders / "child"
+    folder.mkdir(parents=True)
+    folder.chmod(0o750)
+    open_file_properties(folders)
+    send("-k", "Tab", "-k", "Tab", "-k", "space")
+    control("s")
+    wait(lambda: stat.S_IMODE(folder.stat().st_mode) == 0o650, seconds=4)
+    close_file_properties()
+    folder.chmod(0o750)
+
+    links = permissions / "links"
+    links.mkdir()
+    (links / "link.txt").symlink_to(editable)
+    open_file_properties(links)
+    control("s")
+    assert stat.S_IMODE(editable.stat().st_mode) == 0o240
+    preview("preview-files-permissions-link.png")
+    close_file_properties()
+
+    readonly = Path(args.shell).resolve().with_name("mosaic-alt-tab")
+    readonly_stat = readonly.stat()
+    nonowner = os.geteuid() not in (0, readonly_stat.st_uid) and readonly.parts[:3] == ("/", "nix", "store")
+    if nonowner:
+        open_file_properties(readonly.parent)
+        send("-k", "space")
+        control("s")
+        wait(lambda: '\tfiles\tpermissions_failed\t' in ctl("logs").stdout)
+        assert readonly.stat().st_mode == readonly_stat.st_mode
+        preview("preview-files-permissions-denied.png")
+        close_file_properties()
     ctl("window", "close", *main_window[:2])
     assert app.wait(timeout=5) == 0
     app = subprocess.Popen([args.files, notes.as_uri()], env=files_env, stdout=log, stderr=log)
@@ -705,6 +763,8 @@ def run(args, env, root, children, logs, ctl, wait, windows):
               "photo_formats_navigation_and_zoom_visible": bool(args.grim),
               "archive_viewer_and_extraction": True,
               "archive_member_launch_and_context_actions": True,
+              "permissions_edited_from_properties": True,
+              "permissions_nonowner_error": nonowner,
               "access_denied_offer_cancelled": not os.geteuid() == 0}
     Path(args.report).with_name("files.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)
