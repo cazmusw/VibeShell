@@ -2,6 +2,10 @@
 mod address;
 #[path = "mosaic_files/admin.rs"]
 mod admin;
+#[path = "mosaic_files/archive_io.rs"]
+mod archive_io;
+#[path = "mosaic_files/archives.rs"]
+mod archives;
 #[path = "mosaic_files/bookmarks.rs"]
 mod bookmarks;
 #[path = "mosaic_files/filesystem.rs"]
@@ -110,6 +114,7 @@ struct Browser {
     clipboard: Rc<Clipboard>,
     bookmarks: RefCell<Result<Bookmarks, std::io::Error>>,
     pinned: gtk::Box,
+    archive_copies: archives::OpenCopies,
 }
 
 impl Browser {
@@ -146,6 +151,7 @@ impl Browser {
             clipboard: Rc::default(),
             bookmarks: RefCell::new(Bookmarks::load()),
             pinned: gtk::Box::new(gtk::Orientation::Vertical, 4),
+            archive_copies: Default::default(),
         });
         let content = gtk::Paned::builder()
             .orientation(gtk::Orientation::Horizontal)

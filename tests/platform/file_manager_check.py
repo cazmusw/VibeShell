@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 import tomllib
+import zipfile
 import zlib
 
 
@@ -27,6 +28,23 @@ def run(args, env, root, children, logs, ctl, wait, windows):
     files_env = dict(env, HOME=str(home))
     if args.mime_data:
         files_env["XDG_DATA_DIRS"] += ":" + args.mime_data
+    launched_file = home / "opened-from-zip"
+    opener = root / "archive-opener.py"
+    opener.write_text(
+        "from pathlib import Path\nimport sys\n"
+        "source = Path(sys.argv[1])\n"
+        "assert source.name == 'example.txt' and source.parent.name.startswith('.mosaic-archive-')\n"
+        f"Path({str(launched_file)!r}).write_text(source.read_text())\n"
+    )
+    launchers = Path(files_env["XDG_DATA_HOME"]) / "applications"
+    launchers.mkdir(parents=True, exist_ok=True)
+    (launchers / "archive-opener.desktop").write_text(
+        f'[Desktop Entry]\nType=Application\nName=Archive Test Opener\n'
+        f'Exec="{sys.executable}" "{opener}" %f\nMimeType=text/plain;\n'
+    )
+    (Path(files_env["XDG_CONFIG_HOME"]) / "mimeapps.list").write_text(
+        "[Default Applications]\ntext/plain=archive-opener.desktop;\n"
+    )
     pointer = subprocess.Popen([args.pointer, "1280", "720"], env=env, stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, text=True)
     children.append(pointer)
@@ -581,6 +599,76 @@ def run(args, env, root, children, logs, ctl, wait, windows):
     photo_window()
     send("-k", "Escape")
     wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+    sample_zip = home / "sample.zip"
+    with zipfile.ZipFile(sample_zip, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("notes/example.txt", "Archive fixture\n")
+    subprocess.run([args.files, sample_zip.as_uri()], env=files_env, check=True, timeout=5)
+    def files_modal(previous):
+        return wait(lambda: (active := active_window()) and active[2] == '"org.mosaic.Files"'
+                    and active[:2] != previous[:2] and active, seconds=4)
+
+    files_modal(main_window)
+    # The busy dialog for loading the index can briefly take focus first.
+    time.sleep(.35)
+    archive_window = files_modal(main_window)
+    preview("preview-files-archive.png")
+    click(433, 125, settle=.2)
+    wait(lambda: launched_file.is_file() and launched_file.read_text() == "Archive fixture\n")
+    wait(lambda: (active := active_window()) and active[:2] == archive_window[:2])
+    send("-M", "ctrl", "-k", "e", "-m", "ctrl")
+    files_modal(archive_window)
+    send("-k", "Escape")
+    wait(lambda: (active := active_window()) and active[:2] == archive_window[:2])
+    assert not (home / "sample").exists()
+    send("-M", "ctrl", "-k", "e", "-m", "ctrl")
+    files_modal(archive_window)
+    send("-k", "Return")
+    unpacked = home / "sample/notes/example.txt"
+    wait(unpacked.is_file)
+    assert unpacked.read_text() == "Archive fixture\n"
+    wait(lambda: (active := active_window()) and active[:2] == archive_window[:2])
+    send("-k", "Escape")
+    wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+
+    zip_source = home / "zip-source"
+    zip_source.mkdir()
+    (zip_source / "message.txt").write_text("Packed from the context menu\n")
+    open_folder(zip_source)
+    click(806, 264, 273, settle=.2)
+    time.sleep(.3)
+    preview("preview-files-archive-actions.png")
+    click(806, 545, settle=.2)
+    files_modal(main_window)
+    send("-k", "Return")
+    packed = zip_source / "message.txt.zip"
+    wait(packed.is_file)
+    with zipfile.ZipFile(packed) as archive:
+        assert archive.read("message.txt") == b"Packed from the context menu\n"
+    wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+    (zip_source / "message.txt").rename(zip_source / "z-original.txt")
+    send("-k", "F5")
+    time.sleep(.35)
+    click(806, 264, 273, settle=.2)
+    time.sleep(.3)
+    click(806, 285, settle=.2)
+    files_modal(main_window)
+    time.sleep(.35)
+    files_modal(main_window)
+    send("-k", "Escape")
+    wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+    click(806, 264, 273, settle=.2)
+    time.sleep(.3)
+    click(806, 575, settle=.2)
+    files_modal(main_window)
+    time.sleep(.35)
+    destination = home / "custom-unpack"
+    destination.mkdir()
+    control("a")
+    send(str(destination), "-s", "100", "-k", "Return")
+    copied_entry = destination / "message.txt/message.txt"
+    wait(copied_entry.is_file)
+    assert copied_entry.read_text() == "Packed from the context menu\n"
+    wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
     ctl("window", "close", *main_window[:2])
     assert app.wait(timeout=5) == 0
     app = subprocess.Popen([args.files, notes.as_uri()], env=files_env, stdout=log, stderr=log)
@@ -615,6 +703,8 @@ def run(args, env, root, children, logs, ctl, wait, windows):
               "sidebar_narrows_and_widens": bool(args.grim),
               "built_in_photo_viewer_and_safe_decode_limits": True,
               "photo_formats_navigation_and_zoom_visible": bool(args.grim),
+              "archive_viewer_and_extraction": True,
+              "archive_member_launch_and_context_actions": True,
               "access_denied_offer_cancelled": not os.geteuid() == 0}
     Path(args.report).with_name("files.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)

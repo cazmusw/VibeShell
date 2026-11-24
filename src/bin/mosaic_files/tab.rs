@@ -4,7 +4,7 @@ use crate::filesystem::{
 };
 use crate::navigation::{History, Navigation};
 use crate::transfer::{self, Batch, Kind, TransferError};
-use crate::{Browser, admin, photos};
+use crate::{Browser, admin, archives, photos};
 use glib::translate::IntoGlib;
 use gtk::{gdk, gio, glib, pango, prelude::*};
 use std::{
@@ -19,12 +19,23 @@ type ItemContext = Rc<RefCell<Weak<Tab>>>;
 #[derive(Clone, Copy)]
 enum ItemAction {
     Open,
+    Pack,
+    Unpack,
     OpenAsAdministrator,
     ToggleBookmark,
     CopyPath,
     Properties,
     Create(CreateKind),
     Command(Command),
+}
+
+impl ItemAction {
+    fn hidden_when_disabled(self) -> bool {
+        matches!(
+            self,
+            Self::OpenAsAdministrator | Self::ToggleBookmark | Self::Pack | Self::Unpack
+        )
+    }
 }
 
 #[derive(Default)]
@@ -446,6 +457,12 @@ impl Tab {
             .filter(|(_, directory)| *directory)
             .and_then(|(file, _)| file.path());
         let local_directory = directory.path();
+        let archive = item
+            .as_ref()
+            .filter(|(_, folder)| !folder)
+            .and_then(|(file, _)| file.path())
+            .is_some_and(|path| archives::is_zip(&path));
+        let single_archive = archive && self.selection.selection().size() == 1;
         let pinned = local_folder
             .as_deref()
             .or(local_directory.as_deref())
@@ -472,7 +489,15 @@ impl Tab {
             ),
         ];
         let item_sections: &[&[(&str, ItemAction, bool)]] = &[
-            &[("Открыть", ItemAction::Open, true)],
+            &[(
+                if archive {
+                    "Открыть архив"
+                } else {
+                    "Открыть"
+                },
+                ItemAction::Open,
+                true,
+            )],
             &[
                 (
                     "Вырезать",
@@ -505,6 +530,8 @@ impl Tab {
                     ItemAction::ToggleBookmark,
                     local_folder.is_some() && self.selection.selection().size() == 1,
                 ),
+                ("Запаковать…", ItemAction::Pack, local_directory.is_some()),
+                ("Распаковать…", ItemAction::Unpack, single_archive),
                 (
                     "Открыть с правами администратора…",
                     ItemAction::OpenAsAdministrator,
@@ -526,25 +553,17 @@ impl Tab {
             background_sections
         };
         for (index, entries) in sections.iter().enumerate() {
-            if !entries.iter().any(|(_, item, enabled)| {
-                *enabled
-                    || !matches!(
-                        item,
-                        ItemAction::OpenAsAdministrator | ItemAction::ToggleBookmark
-                    )
-            }) {
+            if !entries
+                .iter()
+                .any(|(_, item, enabled)| *enabled || !item.hidden_when_disabled())
+            {
                 continue;
             }
             if index != 0 {
                 menu.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
             }
             for &(label, item, enabled) in *entries {
-                if !enabled
-                    && matches!(
-                        item,
-                        ItemAction::OpenAsAdministrator | ItemAction::ToggleBookmark
-                    )
-                {
+                if !enabled && item.hidden_when_disabled() {
                     continue;
                 }
                 let action = gtk::Button::with_label(label);
@@ -574,7 +593,21 @@ impl Tab {
             1,
             1,
         )));
-        popup.set_child(Some(&menu));
+        if position.is_some() {
+            // Labwc can resize a popup to the usable output height. Keep the child
+            // shrinkable so GTK can display the menu and scroll to the remaining actions.
+            let scroll = gtk::ScrolledWindow::builder()
+                .hscrollbar_policy(gtk::PolicyType::Never)
+                .vscrollbar_policy(gtk::PolicyType::Automatic)
+                .max_content_height(315)
+                .propagate_natural_height(true)
+                .propagate_natural_width(true)
+                .child(&menu)
+                .build();
+            popup.set_child(Some(&scroll));
+        } else {
+            popup.set_child(Some(&menu));
+        }
         popup.set_parent(&self.page);
         let tab = Rc::downgrade(self);
         popup.connect_closed(move |popup| {
@@ -607,6 +640,26 @@ impl Tab {
             ItemAction::Open => {
                 if let Some(position) = position {
                     self.open_at(position);
+                }
+            }
+            ItemAction::Pack => {
+                if let Some(parent) = self.parent_window()
+                    && let Some(directory) = self.directory().path()
+                    && let Some(sources) = self
+                        .selected_files()
+                        .iter()
+                        .map(gio::File::path)
+                        .collect::<Option<Vec<_>>>()
+                    && !sources.is_empty()
+                {
+                    archives::create(&parent, &directory, sources, self.archive_refresh());
+                }
+            }
+            ItemAction::Unpack => {
+                if let Some((file, false)) =
+                    position.and_then(|position| self.entry_target(position))
+                {
+                    self.open_file_with_unpack(file, true);
                 }
             }
             ItemAction::OpenAsAdministrator => {
@@ -757,6 +810,19 @@ impl Tab {
     }
 
     fn open_file(self: &Rc<Self>, file: gio::File) {
+        self.open_file_with_unpack(file, false);
+    }
+
+    fn archive_refresh(self: &Rc<Self>) -> impl Fn() + Clone + 'static {
+        let tab = Rc::downgrade(self);
+        move || {
+            if let Some(tab) = tab.upgrade() {
+                tab.command(Command::Refresh);
+            }
+        }
+    }
+
+    fn open_file_with_unpack(self: &Rc<Self>, file: gio::File, unpack: bool) {
         if file.has_uri_scheme("admin") {
             self.open_as_administrator(file);
             return;
@@ -783,6 +849,18 @@ impl Tab {
                     }
                     return;
                 }
+            }
+            if let Some(path) = file.path().filter(|path| archives::is_zip(path))
+                && let Some(tab) = tab.upgrade()
+                && let Some(parent) = tab.parent_window()
+            {
+                let refresh = tab.archive_refresh();
+                if unpack {
+                    archives::unpack_to_folder(&parent, path, move |_| refresh());
+                } else if let Some(browser) = tab.browser.upgrade() {
+                    archives::show(&parent, path, browser.archive_copies.clone(), refresh);
+                }
+                return;
             }
             if let Some(photo) = photos::Photo::from_file(&file)
                 && let Some(tab) = tab.upgrade()
