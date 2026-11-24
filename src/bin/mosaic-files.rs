@@ -10,6 +10,8 @@ mod archives;
 mod bookmarks;
 #[path = "mosaic_files/filesystem.rs"]
 mod filesystem;
+#[path = "mosaic_files/folder_sizes.rs"]
+mod folder_sizes;
 #[path = "mosaic_files/navigation.rs"]
 mod navigation;
 #[path = "mosaic_files/photos.rs"]
@@ -120,6 +122,7 @@ struct Browser {
     pinned: gtk::Box,
     archive_copies: archives::OpenCopies,
     tab_menu: RefCell<Option<gtk::Popover>>,
+    folder_sizes: Rc<folder_sizes::Queue>,
 }
 
 #[derive(Clone, Copy)]
@@ -169,6 +172,7 @@ impl Browser {
             pinned: gtk::Box::new(gtk::Orientation::Vertical, 4),
             archive_copies: Default::default(),
             tab_menu: RefCell::default(),
+            folder_sizes: folder_sizes::Queue::new(),
         });
         let content = gtk::Paned::builder()
             .orientation(gtk::Orientation::Horizontal)
@@ -185,6 +189,7 @@ impl Browser {
         let keep_alive = browser.clone();
         window.connect_close_request(move |_| {
             // The window owns the controller, and the controller holds the window weakly.
+            keep_alive.folder_sizes.cancel();
             let menu = keep_alive.tab_menu.take();
             if let Some(menu) = menu {
                 menu.popdown();
@@ -197,6 +202,7 @@ impl Browser {
         browser.install_actions(&window);
         browser.install_file_keys(&window);
         browser.install_tab_menu();
+        browser.install_folder_sizes();
         (browser, window)
     }
 
@@ -508,6 +514,33 @@ impl Browser {
             .iter()
             .find(|tab| tab.page.upcast_ref::<gtk::Widget>() == &page)
             .cloned()
+    }
+
+    fn install_folder_sizes(self: &Rc<Self>) {
+        let browser = Rc::downgrade(self);
+        self.notebook.connect_page_notify(move |_| {
+            if let Some(browser) = browser.upgrade() {
+                browser.refresh_folder_sizes();
+            }
+        });
+        let browser = Rc::downgrade(self);
+        glib::timeout_add_local(folder_sizes::REFRESH_INTERVAL, move || {
+            let Some(browser) = browser.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            if !browser.folder_sizes.busy() {
+                browser.refresh_folder_sizes();
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    fn refresh_folder_sizes(&self) {
+        if let Some(tab) = self.current_tab() {
+            tab.schedule_folder_sizes();
+        } else {
+            self.folder_sizes.cancel();
+        }
     }
 
     fn close_tab(&self, tab: &Rc<Tab>) {

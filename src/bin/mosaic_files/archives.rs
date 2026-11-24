@@ -247,7 +247,7 @@ pub fn create(
     parent: &gtk::Window,
     directory: &Path,
     sources: Vec<PathBuf>,
-    refresh: impl Fn() + Clone + 'static,
+    refresh: impl Fn(&Path) + Clone + 'static,
 ) {
     let initial = match sources.as_slice() {
         [source] => {
@@ -271,12 +271,13 @@ pub fn create(
             }
             let sources = sources.clone();
             let refresh = refresh.clone();
+            let written = destination.clone();
             job(
                 parent,
                 "Создание архива…",
                 move |cancel| archive_io::pack(&sources, &destination, cancel),
                 move |parent, result| match result {
-                    Ok(()) => refresh(),
+                    Ok(()) => refresh(&written),
                     Err(error) => error_dialog(parent, error),
                 },
             );
@@ -315,7 +316,14 @@ pub fn unpack_to_folder(
     );
 }
 
-pub fn show(parent: &gtk::Window, path: PathBuf, copies: OpenCopies, refresh: impl Fn() + 'static) {
+type ArchiveRefresh = Rc<dyn Fn(&Path)>;
+
+pub fn show(
+    parent: &gtk::Window,
+    path: PathBuf,
+    copies: OpenCopies,
+    refresh: impl Fn(&Path) + 'static,
+) {
     let source = path.clone();
     job(
         parent,
@@ -333,7 +341,7 @@ fn viewer(
     path: PathBuf,
     entries: Vec<Member>,
     copies: OpenCopies,
-    refresh: Rc<dyn Fn()>,
+    refresh: ArchiveRefresh,
 ) {
     let title = format!("Архив · {}", glib::filename_display_basename(&path));
     let window = dialog(parent, &title, 740);
@@ -471,7 +479,7 @@ fn viewer(
         let refresh = refresh.clone();
         let label = label.clone();
         unpack_to_folder(&window, path.clone(), move |path| {
-            refresh();
+            refresh(path);
             if let Some(label) = label.upgrade() {
                 label.set_text(&format!(
                     "Распаковано в «{}»",

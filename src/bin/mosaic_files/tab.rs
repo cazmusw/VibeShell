@@ -4,12 +4,12 @@ use crate::filesystem::{
 };
 use crate::navigation::{History, Navigation};
 use crate::transfer::{self, Batch, Kind, TransferError};
-use crate::{Browser, admin, archives, photos, properties, templates};
+use crate::{Browser, admin, archives, folder_sizes, photos, properties, templates};
 use glib::translate::IntoGlib;
 use gtk::{gdk, gio, glib, pango, prelude::*};
 use std::{
     cell::{Cell, RefCell},
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     rc::{Rc, Weak},
 };
@@ -109,6 +109,8 @@ pub struct Tab {
     filtered: gtk::FilterListModel,
     filter: gtk::CustomFilter,
     selection: gtk::MultiSelection,
+    size_sorter: gtk::CustomSorter,
+    resort_pending: Cell<bool>,
 }
 
 impl Tab {
@@ -180,7 +182,7 @@ impl Tab {
         let filter = gtk::CustomFilter::new(|_| true);
         let filtered = gtk::FilterListModel::new(Some(rows.clone()), Some(filter.clone()));
         let item_context: ItemContext = Rc::default();
-        let (list, selection) = file_list(&filtered, &item_context);
+        let (list, selection, size_sorter) = file_list(&filtered, &item_context);
         let grid = gtk::GridView::new(
             Some(selection.clone()),
             Some(file_factory(true, &item_context)),
@@ -236,6 +238,8 @@ impl Tab {
             filtered,
             filter,
             selection,
+            size_sorter,
+            resort_pending: Cell::new(false),
         });
         *item_context.borrow_mut() = Rc::downgrade(&tab);
         tab.connect(&list, &grid);
@@ -281,6 +285,7 @@ impl Tab {
         self.search.connect_search_changed(move |_| {
             if let Some(tab) = tab.upgrade() {
                 tab.update_filter();
+                tab.schedule_folder_sizes();
             }
         });
         self.search
@@ -289,6 +294,7 @@ impl Tab {
         self.hidden.connect_toggled(move |_| {
             if let Some(tab) = tab.upgrade() {
                 tab.update_filter();
+                tab.schedule_folder_sizes();
             }
         });
         let tab = Rc::downgrade(self);
@@ -322,6 +328,7 @@ impl Tab {
             if let Some(tab) = tab.upgrade() {
                 tab.close_context_menu();
                 tab.update_status();
+                tab.schedule_folder_sizes();
             }
         });
         let tab = Rc::downgrade(self);
@@ -777,11 +784,19 @@ impl Tab {
         self.open_file_with_unpack(file, false);
     }
 
-    fn archive_refresh(self: &Rc<Self>) -> impl Fn() + Clone + 'static {
-        let tab = Rc::downgrade(self);
-        move || {
-            if let Some(tab) = tab.upgrade() {
-                tab.command(Command::Refresh);
+    fn archive_refresh(self: &Rc<Self>) -> impl Fn(&Path) + Clone + 'static {
+        let browser = self.browser.clone();
+        move |written| {
+            if let Some(browser) = browser.upgrade() {
+                browser.folder_sizes.invalidate([written.to_path_buf()]);
+                if let Some(directory) = written.parent() {
+                    for tab in browser.clipboard.tabs() {
+                        if !tab.loading() && tab.directory().path().as_deref() == Some(directory) {
+                            tab.command(Command::Refresh);
+                        }
+                    }
+                }
+                browser.refresh_folder_sizes();
             }
         }
     }
@@ -820,7 +835,7 @@ impl Tab {
             {
                 let refresh = tab.archive_refresh();
                 if unpack {
-                    archives::unpack_to_folder(&parent, path, move |_| refresh());
+                    archives::unpack_to_folder(&parent, path, refresh);
                 } else if let Some(browser) = tab.browser.upgrade() {
                     archives::show(&parent, path, browser.archive_copies.clone(), refresh);
                 }
@@ -883,6 +898,9 @@ impl Tab {
         if let Some(previous) = self.request.borrow_mut().take() {
             previous.abort();
         }
+        if let Some(browser) = self.active_browser() {
+            browser.folder_sizes.cancel();
+        }
         let file = gio::File::for_uri(&uri);
         self.notice.set_visible(false);
         let tab = Rc::downgrade(self);
@@ -927,10 +945,69 @@ impl Tab {
             }
             tab.update_controls();
             tab.update_status();
+            tab.schedule_folder_sizes();
         });
         *self.request.borrow_mut() = Some(task);
         self.update_controls();
         self.update_status();
+    }
+
+    fn active_browser(self: &Rc<Self>) -> Option<Rc<Browser>> {
+        self.browser.upgrade().filter(|browser| {
+            browser
+                .current_tab()
+                .is_some_and(|current| Rc::ptr_eq(&current, self))
+        })
+    }
+
+    pub fn schedule_folder_sizes(self: &Rc<Self>) {
+        let Some(browser) = self.active_browser() else {
+            return;
+        };
+        if !self.loaded.get()
+            || self.loading()
+            || self.mutating.get()
+            || self.view_mode.selected() != 0
+        {
+            browser.folder_sizes.cancel();
+            return;
+        }
+        let mut folders = Vec::new();
+        let mut sizes = HashMap::new();
+        for index in 0..self.filtered.n_items() {
+            if let Some(row) = self
+                .filtered
+                .item(index)
+                .and_downcast::<glib::BoxedAnyObject>()
+            {
+                let entry = row.borrow::<FileEntry>();
+                if let (Some(size), Some(path)) = (&entry.folder_size, entry.file.path()) {
+                    folders.push(path.clone());
+                    sizes.insert(path, size.clone());
+                }
+            }
+        }
+        let tab = Rc::downgrade(self);
+        browser.folder_sizes.submit(folders, move |path, value| {
+            let Some(tab) = tab.upgrade() else { return };
+            let Some(size) = sizes.get(path) else { return };
+            use folder_sizes::Value;
+            let (bytes, text) = match value {
+                Value::Cached(bytes) => (Some(bytes), format!("≈ {}", glib::format_size(bytes))),
+                Value::Measured(bytes) => (Some(bytes), glib::format_size(bytes).into()),
+                Value::Unavailable => (None, "Недоступно".into()),
+                Value::Limit => (None, "Лимит".into()),
+            };
+            if size.update(bytes, &text) && !tab.resort_pending.replace(true) {
+                let tab = Rc::downgrade(&tab);
+                glib::timeout_add_local_once(std::time::Duration::from_millis(200), move || {
+                    if let Some(tab) = tab.upgrade() {
+                        tab.resort_pending.set(false);
+                        tab.size_sorter.changed(gtk::SorterChange::Different);
+                    }
+                });
+            }
+        });
     }
 
     pub fn handle_file_key(self: &Rc<Self>, key: gdk::Key) -> glib::Propagation {
@@ -1107,6 +1184,7 @@ impl Tab {
         self.update_status();
         let tab = Rc::downgrade(self);
         let clipboard = self.clipboard.clone();
+        let browser = self.browser.clone();
         let hold = self
             .parent_window()
             .and_then(|window| window.application())
@@ -1145,6 +1223,17 @@ impl Tab {
             *clipboard.entry.borrow_mut() = batch.after_paste(&completed);
             finish_paste(&clipboard, &tab);
             if inserted > 0 {
+                let browser = browser.upgrade();
+                if let Some(browser) = &browser {
+                    browser.folder_sizes.invalidate(
+                        std::iter::once(directory.clone()).chain(
+                            affected
+                                .iter()
+                                .filter(|_| kind == Kind::Move)
+                                .map(|path| path.to_path_buf()),
+                        ),
+                    );
+                }
                 for open in clipboard.tabs() {
                     let current = open.directory().path();
                     if !open.loading()
@@ -1155,6 +1244,9 @@ impl Tab {
                     {
                         open.navigate(Navigation::Reload);
                     }
+                }
+                if let Some(browser) = browser {
+                    browser.refresh_folder_sizes();
                 }
             }
             if let Some(error) = first_error {
@@ -1391,6 +1483,7 @@ impl Tab {
         self.update_controls();
         self.update_status();
         let tab = Rc::downgrade(self);
+        let browser = self.browser.clone();
         let hold = self
             .parent_window()
             .and_then(|window| window.application())
@@ -1448,11 +1541,23 @@ impl Tab {
                     )
                 }
             };
-            let Some(tab) = tab.upgrade() else { return };
-            tab.mutating.set(false);
             let changed = result.is_ok() || trashed.is_some_and(|(done, _)| done > 0);
+            let browser = browser.upgrade().filter(|_| changed);
+            if let Some(browser) = &browser {
+                browser.folder_sizes.invalidate(directory.path());
+            }
+            let Some(tab) = tab.upgrade() else {
+                if let Some(browser) = browser {
+                    browser.refresh_folder_sizes();
+                }
+                return;
+            };
+            tab.mutating.set(false);
             if changed && tab.directory().equal(&directory) && !tab.loading() {
                 tab.navigate_to(Navigation::Reload, false, created);
+            }
+            if let Some(browser) = browser {
+                browser.refresh_folder_sizes();
             }
             if let Err(error) = result {
                 if let Some((done, total)) = trashed
@@ -1740,7 +1845,7 @@ fn file_factory(tile: bool, context: &ItemContext) -> gtk::SignalListItemFactory
 fn file_list(
     filtered: &gtk::FilterListModel,
     context: &ItemContext,
-) -> (gtk::ColumnView, gtk::MultiSelection) {
+) -> (gtk::ColumnView, gtk::MultiSelection, gtk::CustomSorter) {
     let view = gtk::ColumnView::new(None::<gtk::SelectionModel>);
     view.add_css_class("files-list");
     view.set_show_row_separators(true);
@@ -1755,10 +1860,12 @@ fn file_list(
     kind.set_sorter(Some(&file_sorter(|a, b| a.type_label.cmp(&b.type_label))));
     view.append_column(&kind);
 
-    let size = details_column("Размер", 96, context, |entry| {
-        entry.size.map(glib::format_size).unwrap_or_default()
+    let size = size_column(context);
+    let size_sorter = file_sorter(|a, b| {
+        let bytes = |entry: &FileEntry| entry.size.or_else(|| entry.folder_size.as_ref()?.bytes());
+        bytes(a).cmp(&bytes(b))
     });
-    size.set_sorter(Some(&file_sorter(|a, b| a.size.cmp(&b.size))));
+    size.set_sorter(Some(&size_sorter));
     view.append_column(&size);
 
     let modified = details_column("Изменён", 155, context, |entry| {
@@ -1779,7 +1886,7 @@ fn file_list(
     let model = gtk::SortListModel::new(Some(filtered.clone()), Some(sorters));
     let selection = gtk::MultiSelection::new(Some(model));
     view.set_model(Some(&selection));
-    (view, selection)
+    (view, selection, size_sorter)
 }
 
 fn file_sorter(compare: fn(&FileEntry, &FileEntry) -> std::cmp::Ordering) -> gtk::CustomSorter {
@@ -1800,10 +1907,7 @@ fn details_column(
     let context = context.clone();
     factory.connect_setup(move |_, item| {
         if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
-            let label = gtk::Label::new(None);
-            label.add_css_class("files-detail");
-            label.set_xalign(0.0);
-            label.set_ellipsize(pango::EllipsizeMode::End);
+            let label = detail_label();
             connect_item_actions(item, &label, &context);
             item.set_child(Some(&label));
         }
@@ -1823,6 +1927,56 @@ fn details_column(
     });
     let column = gtk::ColumnViewColumn::new(Some(title), Some(factory));
     column.set_fixed_width(width);
+    column.set_resizable(true);
+    column
+}
+
+fn detail_label() -> gtk::Label {
+    let label = gtk::Label::new(None);
+    label.add_css_class("files-detail");
+    label.set_xalign(0.0);
+    label.set_ellipsize(pango::EllipsizeMode::End);
+    label
+}
+
+fn size_column(context: &ItemContext) -> gtk::ColumnViewColumn {
+    let factory = gtk::SignalListItemFactory::new();
+    let context = context.clone();
+    factory.connect_setup(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let label = detail_label();
+        connect_item_actions(item, &label, &context);
+        item.set_child(Some(&label));
+        let label = label.downgrade();
+        let bindings: RefCell<Vec<glib::Binding>> = RefCell::default();
+        item.connect_item_notify(move |item| {
+            for binding in bindings.take() {
+                if binding.source().is_some() && binding.target().is_some() {
+                    binding.unbind();
+                }
+            }
+            let Some(label) = label.upgrade() else { return };
+            let row = item.item().and_downcast::<glib::BoxedAnyObject>();
+            let entry = row.as_ref().map(|row| row.borrow::<FileEntry>());
+            if let Some(size) = entry.as_ref().and_then(|entry| entry.folder_size.as_ref()) {
+                for property in ["label", "tooltip-text"] {
+                    bindings.borrow_mut().push(
+                        size.bind_property("text", &label, property)
+                            .sync_create()
+                            .build(),
+                    );
+                }
+            } else {
+                let text = entry.and_then(|entry| entry.size).map(glib::format_size);
+                label.set_text(text.as_deref().unwrap_or_default());
+                label.set_tooltip_text(text.as_deref());
+            }
+        });
+    });
+    let column = gtk::ColumnViewColumn::new(Some("Размер"), Some(factory));
+    column.set_fixed_width(96);
     column.set_resizable(true);
     column
 }

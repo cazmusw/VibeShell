@@ -794,6 +794,40 @@ def run(args, env, root, children, logs, ctl, wait, windows):
     assert list(from_template.iterdir()) == [instance]
     preview("preview-files-template-unavailable.png")
 
+    size_fixture = home / "folder-count-fixture"
+    measured = size_fixture / "counted"
+    deep = measured / "nested" / "deeper"
+    deep.mkdir(parents=True)
+    (measured / "top.txt").write_bytes(b"x" * 100)
+    counted_file = deep / "nested.txt"
+    counted_file.write_bytes(b"y" * 221)
+    (measured / "outside").symlink_to(notes, target_is_directory=True)
+    size_cache = Path(files_env["XDG_CACHE_HOME"]) / "mosaic-files/folder-sizes.json"
+
+    def cached_folder_bytes():
+        if not size_cache.exists():
+            return None
+        for record in json.loads(size_cache.read_text())["entries"]:
+            if bytes(record["path"]) == os.fsencode(measured):
+                return record["bytes"]
+        return None
+
+    open_folder(size_fixture)
+    wait(lambda: cached_folder_bytes() == 321, seconds=5)
+    if args.grim:
+        def size_cell():
+            return subprocess.check_output([args.grim, "-g", "890,248 94x46", "-"],
+                                           env=env, timeout=5)
+
+        before_size_change = size_cell()
+        preview("preview-files-folder-sizes.png")
+
+    counted_file.write_bytes(b"z" * 4100)
+    send("-k", "F5")
+    wait(lambda: cached_folder_bytes() == 4200, seconds=5)
+    if args.grim:
+        wait(lambda: size_cell() != before_size_change, seconds=5)
+
     shortcuts = home / "shortcuts"
     shortcuts.mkdir()
     open_folder(shortcuts)
@@ -920,6 +954,7 @@ def run(args, env, root, children, logs, ctl, wait, windows):
               "context_refresh_reads_external_changes": True,
               "tab_context_moves_and_closes_relative_to_selected_tab": True,
               "tab_context_refresh_reads_its_own_directory": True,
+              "folder_sizes_persist_skip_symlinks_and_refresh_nested_changes": True,
               "access_denied_offer_cancelled": not os.geteuid() == 0}
     Path(args.report).with_name("files.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)

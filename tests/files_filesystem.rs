@@ -81,6 +81,10 @@ fn enumeration_keeps_native_filenames_and_includes_hidden_files() {
     assert_eq!(files.len(), 3);
     assert_eq!(files[0].name, "Z Folder");
     assert!(files[0].is_directory);
+    let size = files[0].folder_size.as_ref().unwrap();
+    assert_eq!(size.bytes(), None);
+    assert!(size.update(Some(0), "0"));
+    assert_eq!(size.bytes(), Some(0));
     assert!(files[1].is_hidden);
     assert_eq!(files[2].file.path(), Some(non_unicode));
     assert_eq!(files[2].size, Some(5));

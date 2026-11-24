@@ -1,5 +1,52 @@
 use gtk::{gio, glib, prelude::*};
 
+mod size_object {
+    use gtk::glib::{self, subclass::prelude::*};
+    use gtk::prelude::*;
+    use std::cell::{Cell, RefCell};
+
+    #[derive(Default, glib::Properties)]
+    #[properties(wrapper_type = super::FolderSize)]
+    pub struct FolderSize {
+        #[property(get, set)]
+        text: RefCell<String>,
+        pub(super) bytes: Cell<Option<u64>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for FolderSize {
+        const NAME: &'static str = "MosaicFilesFolderSize";
+        type Type = super::FolderSize;
+    }
+
+    #[glib::derived_properties]
+    impl ObjectImpl for FolderSize {}
+}
+
+glib::wrapper! {
+    pub struct FolderSize(ObjectSubclass<size_object::FolderSize>);
+}
+
+impl FolderSize {
+    fn pending() -> Self {
+        glib::Object::builder().property("text", "…").build()
+    }
+
+    pub fn bytes(&self) -> Option<u64> {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        self.imp().bytes.get()
+    }
+
+    pub fn update(&self, bytes: Option<u64>, text: &str) -> bool {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        let changed = self.imp().bytes.replace(bytes) != bytes;
+        if self.text() != text {
+            self.set_text(text);
+        }
+        changed
+    }
+}
+
 pub struct FileEntry {
     pub file: gio::File,
     pub name: glib::GString,
@@ -10,13 +57,14 @@ pub struct FileEntry {
     pub is_directory: bool,
     pub is_hidden: bool,
     pub size: Option<u64>,
+    pub folder_size: Option<FolderSize>,
     pub modified: Option<glib::DateTime>,
 }
 
 pub async fn read_directory(directory: &gio::File) -> Result<Vec<FileEntry>, glib::Error> {
     let enumerator = directory
         .enumerate_children_future(
-            "standard::name,standard::display-name,standard::type,standard::is-hidden,standard::icon,standard::size,standard::fast-content-type,time::modified",
+            "standard::name,standard::display-name,standard::type,standard::is-hidden,standard::is-symlink,standard::icon,standard::size,standard::fast-content-type,time::modified",
             gio::FileQueryInfoFlags::NONE,
             glib::Priority::DEFAULT,
         )
@@ -43,8 +91,11 @@ pub async fn read_directory(directory: &gio::File) -> Result<Vec<FileEntry>, gli
                         |mime| gio::content_type_get_description(&mime),
                     )
             };
+            let file = directory.child(info.name());
+            let folder_size =
+                (is_directory && !info.is_symlink() && file.is_native()).then(FolderSize::pending);
             FileEntry {
-                file: directory.child(info.name()),
+                file,
                 name_key: glib::FilenameCollationKey::from(&search_name),
                 search_name: search_name.into(),
                 type_label,
@@ -55,6 +106,7 @@ pub async fn read_directory(directory: &gio::File) -> Result<Vec<FileEntry>, gli
                 size: (kind == gio::FileType::Regular)
                     .then(|| u64::try_from(info.size()).ok())
                     .flatten(),
+                folder_size,
                 modified: info.modification_date_time(),
             }
         }));
