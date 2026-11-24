@@ -48,7 +48,7 @@ def run(args, env, processes, ctl, wait, config_file):
         send("button 272 1")
         send("button 272 0")
 
-    send("move 1118 16")
+    send("move 1152 16")
     time.sleep(.15)  # Let GTK bind the new virtual pointer.
     send("button 272 1")
     send("button 272 0")

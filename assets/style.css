@@ -9,7 +9,7 @@ window.mosaic-dock { background: transparent; }
 .dock-grid { background: transparent; color: #f0f4ff; border: none; font-size: 30px; min-width: 40px; padding: 8px; }
 .dock-trash image { -gtk-icon-size: 24px; }
 .fallback-icon { background: #355c87; color: #f2f7ff; border-radius: 10px; font-weight: 600; font-size: 20px; }
-.panel-button { background: transparent; color: #f3f5fa; border: none; padding: 2px 10px; min-height: 24px; }
+.panel-button { background: transparent; color: #f3f5fa; border: none; padding: 2px 6px; min-width: 20px; min-height: 24px; }
 .panel-button:hover { background: #36475e; }
 window.mosaic-window { background: #1d2430; color: #edf2fc; }
 .mosaic-window headerbar { background: #222a37; color: #edf2fc; border: none; }
@@ -60,7 +60,7 @@ window.mosaic-window.light { background: #eef2f8; color: #172438; }
 .dock-cards.light .dock-window-content { background: #f7f9fc; }
 .dock-cards.light .dock-window-preview { background: #f7f9fc; }
 
-.panel-clock > button { background: transparent; color: #f3f5fa; border: none; padding: 2px 10px; min-height: 24px; }
+.panel-clock > button { background: transparent; color: #f3f5fa; border: none; padding: 2px 6px; min-height: 24px; }
 .panel-clock > button:hover, .panel-clock > button:checked { background: #36475e; }
 .light .panel-clock > button { color: #172438; }
 .light .panel-clock > button:hover, .light .panel-clock > button:checked { background: #d5e1f2; }

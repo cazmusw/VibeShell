@@ -32,7 +32,7 @@ impl Panel {
         }
         window.auto_exclusive_zone_enable();
         window.set_default_height(32);
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         let menu = gtk::Button::with_label("◈ Mosaic");
         menu.add_css_class("panel-button");
         let action = activate.clone();
@@ -59,7 +59,7 @@ impl Panel {
         quick.update_property(&[gtk::accessible::Property::Label("Центр управления")]);
         let action = activate.clone();
         quick.connect_clicked(move |_| action(PanelItem::Clock));
-        let clock_group = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let clock_group = gtk::Box::new(gtk::Orientation::Horizontal, 2);
         clock_group.append(&quick);
         clock_group.append(&clock);
         let mut items = vec![

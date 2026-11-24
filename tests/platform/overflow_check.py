@@ -24,6 +24,24 @@ def run(args, env, processes, logs, ctl, wait):
     def state():
         return tomllib.loads(ctl("tray", "state").stdout)
 
+    def panel_state():
+        return tomllib.loads(ctl("outputs").stdout)["outputs"][0]
+
+    def inline_items():
+        return [b for b in state()["buttons"] if b["mapped"] and not b["overflow"]]
+
+    def check_compact_panel():
+        panel = panel_state()
+        assert panel["panel_width"] == 640 and panel["panel_height"] == 32
+        items = inline_items()
+        assert 0 < len(items) < 16
+        assert all(30 <= item["width"] <= 34 and item["height"] >= 28 for item in items), items
+        assert all(0 <= item["x"] and item["x"] + item["width"] <= 640 for item in items)
+        more = overflow()
+        trailing_controls = 640 - (more["x"] + more["width"])
+        assert 0 < trailing_controls <= 164, trailing_controls
+        return trailing_controls
+
     wait(lambda: admin("Events", ok=False).returncode == 0 and state()["available"])
     admin("DBusMenu", "b", "true")
     for index in range(16):
@@ -34,9 +52,7 @@ def run(args, env, processes, logs, ctl, wait):
 
     more = wait(overflow)
     assert 0 < more["hidden_count"] < 16
-    panel = tomllib.loads(ctl("outputs").stdout)["outputs"][0]
-    assert panel["panel_width"] == 640 and panel["panel_height"] == 32
-    assert len([b for b in state()["buttons"] if b["mapped"] and not b["overflow"]]) < 16
+    check_compact_panel()
 
     plog = (directory / "overflow-pointer.log").open("w+")
     logs.append(plog)
@@ -91,11 +107,12 @@ def run(args, env, processes, logs, ctl, wait):
         subprocess.run([args.wtype, "-s", "100", "-k", "Escape"], env=env, check=True, timeout=5)
         wait(lambda: not overflow()["open"])
 
-    def resize(width, height):
+    def resize(width, height, scale=1):
         subprocess.run([args.randr, "--output", "HEADLESS-1",
-                        "--custom-mode", f"{width}x{height}@60Hz"],
+                        "--custom-mode", f"{width}x{height}@60Hz", "--scale", str(scale)],
                        env=env, check=True, timeout=5)
-        wait(lambda: tomllib.loads(ctl("outputs").stdout)["outputs"][0]["panel_width"] == width)
+        wait(lambda: (panel := panel_state())["panel_width"] == width / scale
+             and panel["scale"] == scale)
 
     resize(1280, 720)
     wait(lambda: not overflow() and len(state()["buttons"]) == 16)
@@ -119,8 +136,11 @@ def run(args, env, processes, logs, ctl, wait):
     ctl("config", "set", f"panel.order={default_order}\npanel.hidden=[]")
     wait(lambda: len(mapped_items()) == 16 and mapped_items()[first_key]["x"] >= initial_items[first_key]["x"] - 4)
 
-    resize(640, 480)
-    wait(overflow)
+    trailing_widths = {}
+    for scale in (1, 1.25, 1.5, 2):
+        resize(int(640 * scale), int(480 * scale), scale)
+        wait(overflow)
+        trailing_widths[int(scale * 100)] = check_compact_panel()
     admin("Quit")
     assert fixture.wait(timeout=4) == 0
     wait(lambda: not overflow() and not state().get("buttons", []))
@@ -128,6 +148,7 @@ def run(args, env, processes, logs, ctl, wait):
     pointer.stdin.flush()
     pointer.wait(timeout=3)
     result = {"passed": True, "overflow_at_640px": True, "panel_height_preserved": True,
+              "compact_buttons": True, "trailing_control_widths": trailing_widths,
               "real_hidden_item_activation": True, "hidden_dbusmenu": True, "responds_to_resize": True,
               "owner_loss_clears_overflow": True, "panel_reordered_and_restored": True,
               "tray_hidden_and_restored": True, "mandatory_item_protected": True}
