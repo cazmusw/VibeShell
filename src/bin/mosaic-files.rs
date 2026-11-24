@@ -192,11 +192,6 @@ impl Browser {
         self.refresh_bookmarks();
         for (location, name, icon) in [
             (
-                glib::UserDirectory::Desktop,
-                "Рабочий стол",
-                "user-desktop-symbolic",
-            ),
-            (
                 glib::UserDirectory::Downloads,
                 "Загрузки",
                 "folder-download-symbolic",

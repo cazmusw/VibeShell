@@ -27,12 +27,15 @@ def run(args, env, root, children, logs, ctl, wait, windows):
     wait(lambda: desktop_id in tomllib.loads(ctl("config", "get").stdout)["pins"])
     ctl("unpin", desktop_id)
     files_env = dict(env, HOME=str(home))
+    desktop_folder = home / "Desktop"
+    desktop_folder.mkdir()
     template_dir = home / "Templates"
     template_dir.mkdir()
     template = template_dir / "Letter.txt"
     template.write_bytes(b"Template text\n\x00End\n")
     (Path(files_env["XDG_CONFIG_HOME"]) / "user-dirs.dirs").write_text(
         'XDG_TEMPLATES_DIR="$HOME/Templates"\n'
+        'XDG_DESKTOP_DIR="$HOME/Desktop"\n'
     )
     if args.mime_data:
         files_env["XDG_DATA_DIRS"] += ":" + args.mime_data
@@ -499,9 +502,19 @@ def run(args, env, root, children, logs, ctl, wait, windows):
     assert (source / first).read_text() == "recreated after the move"
     assert (destination / first).read_text() == first
 
+    bookmarks = Path(files_env["XDG_CONFIG_HOME"]) / "mosaic-files/bookmarks.toml"
+    open_folder(notes)
+    # The first built-in place below Home previously linked to XDG Desktop.
+    click(220, 181, settle=.2)
+    time.sleep(.35)
+    control("d")
+    wait(lambda: bookmarks.exists() and tomllib.loads(bookmarks.read_text())["folders"])
+    assert str(desktop_folder) not in tomllib.loads(bookmarks.read_text())["folders"]
+    control("d")
+    wait(lambda: not tomllib.loads(bookmarks.read_text())["folders"])
+
     open_folder(notes)
     control("d")
-    bookmarks = Path(files_env["XDG_CONFIG_HOME"]) / "mosaic-files/bookmarks.toml"
     wait(lambda: bookmarks.exists() and str(notes) in tomllib.loads(bookmarks.read_text())["folders"])
     preview("preview-files-bookmarks.png")
 
@@ -780,11 +793,18 @@ def run(args, env, root, children, logs, ctl, wait, windows):
     wait(lambda: ctl("logs").stdout.count(error_event) > error_count)
     assert list(from_template.iterdir()) == [instance]
     preview("preview-files-template-unavailable.png")
+    open_folder(desktop_folder)
+    control("d")
+    wait(lambda: tomllib.loads(bookmarks.read_text())["folders"] == [str(notes), str(desktop_folder)])
     ctl("window", "close", *main_window[:2])
     assert app.wait(timeout=5) == 0
     app = subprocess.Popen([args.files, notes.as_uri()], env=files_env, stdout=log, stderr=log)
     children.append(app)
     restored_window = wait(lambda: (active := active_window()) and active[2] == '"org.mosaic.Files"' and active)
+    time.sleep(.4)
+    control("d")
+    wait(lambda: tomllib.loads(bookmarks.read_text())["folders"] == [str(desktop_folder)])
+    click(224, 207, settle=.2)
     time.sleep(.4)
     control("d")
     wait(lambda: not tomllib.loads(bookmarks.read_text())["folders"])
@@ -811,6 +831,7 @@ def run(args, env, root, children, logs, ctl, wait, windows):
               "empty_folder_context_creation_and_selection": True, "create_inside_nested_folder": True,
               "table_and_grid_marquee_select_mixed_entries": True,
               "bookmarks_survive_restart_and_toggle_off": True,
+              "desktop_absent_by_default_and_manual_bookmark_works": True,
               "sidebar_narrows_and_widens": bool(args.grim),
               "built_in_photo_viewer_and_safe_decode_limits": True,
               "photo_formats_navigation_and_zoom_visible": bool(args.grim),
