@@ -278,43 +278,6 @@ impl Tab {
             }
         });
         let tab = Rc::downgrade(self);
-        let keys = gtk::EventControllerKey::new();
-        keys.connect_key_pressed(move |_, key, _, modifiers| {
-            let relevant = gdk::ModifierType::CONTROL_MASK
-                | gdk::ModifierType::SHIFT_MASK
-                | gdk::ModifierType::ALT_MASK
-                | gdk::ModifierType::SUPER_MASK;
-            let Some(tab) = tab.upgrade() else {
-                return glib::Propagation::Proceed;
-            };
-            if modifiers & relevant != gdk::ModifierType::CONTROL_MASK
-                || tab
-                    .parent_window()
-                    .and_then(|window| GtkWindowExt::focus(&window))
-                    .is_some_and(|focus| {
-                        focus.is::<gtk::Text>()
-                            || focus.is::<gtk::Entry>()
-                            || focus.is::<gtk::SearchEntry>()
-                            || focus.is::<gtk::Label>()
-                    })
-            {
-                return glib::Propagation::Proceed;
-            }
-            let command = match key.to_lower() {
-                gdk::Key::a => {
-                    tab.selection.select_all();
-                    return glib::Propagation::Stop;
-                }
-                gdk::Key::x => Command::Clip(Kind::Move),
-                gdk::Key::c => Command::Clip(Kind::Copy),
-                gdk::Key::v => Command::Paste,
-                _ => return glib::Propagation::Proceed,
-            };
-            tab.command(command);
-            glib::Propagation::Stop
-        });
-        self.page.add_controller(keys);
-        let tab = Rc::downgrade(self);
         self.search.connect_search_changed(move |_| {
             if let Some(tab) = tab.upgrade() {
                 tab.update_filter();
@@ -488,6 +451,11 @@ impl Tab {
                 self.create.is_sensitive(),
             ),
         ];
+        let refresh = (
+            "Обновить",
+            ItemAction::Command(Command::Refresh),
+            self.refresh.is_sensitive(),
+        );
         let item_sections: &[&[(&str, ItemAction, bool)]] = &[
             &[(
                 if archive {
@@ -537,15 +505,19 @@ impl Tab {
                     ItemAction::OpenAsAdministrator,
                     item.as_ref().is_some_and(|(file, _)| file.path().is_some()),
                 ),
+                refresh,
             ],
         ];
         let background_sections: &[&[(&str, ItemAction, bool)]] = &[
             &create,
-            &[(
-                bookmark,
-                ItemAction::ToggleBookmark,
-                local_directory.is_some() && self.loaded.get(),
-            )],
+            &[
+                (
+                    bookmark,
+                    ItemAction::ToggleBookmark,
+                    local_directory.is_some() && self.loaded.get(),
+                ),
+                refresh,
+            ],
         ];
         let sections = if position.is_some() {
             item_sections
@@ -961,6 +933,21 @@ impl Tab {
         self.update_status();
     }
 
+    pub fn handle_file_key(self: &Rc<Self>, key: gdk::Key) -> glib::Propagation {
+        let command = match key.to_lower() {
+            gdk::Key::a => {
+                self.selection.select_all();
+                return glib::Propagation::Stop;
+            }
+            gdk::Key::x => Command::Clip(Kind::Move),
+            gdk::Key::c => Command::Clip(Kind::Copy),
+            gdk::Key::v => Command::Paste,
+            _ => return glib::Propagation::Proceed,
+        };
+        self.command(command);
+        glib::Propagation::Stop
+    }
+
     pub fn command(self: &Rc<Self>, command: Command) {
         match command {
             Command::Back => self.navigate(Navigation::Back),
@@ -1193,15 +1180,16 @@ impl Tab {
         });
     }
 
-    fn selected(&self) -> Option<(gio::File, glib::GString)> {
+    fn selected_row(&self) -> Option<glib::BoxedAnyObject> {
         let positions = self.selection.selection();
         if positions.size() != 1 {
             return None;
         }
-        let selected = self
-            .selection
-            .item(positions.nth(0))
-            .and_downcast::<glib::BoxedAnyObject>()?;
+        self.selection.item(positions.nth(0)).and_downcast()
+    }
+
+    fn selected(&self) -> Option<(gio::File, glib::GString)> {
+        let selected = self.selected_row()?;
         let entry = selected.borrow::<FileEntry>();
         Some((entry.file.clone(), entry.name.clone()))
     }
@@ -1244,10 +1232,11 @@ impl Tab {
             return;
         };
         let target = if matches!(action, NamePrompt::Rename) {
-            let Some(selected) = self.selected() else {
+            let Some(selected) = self.selected_row() else {
                 return;
             };
-            Some(selected)
+            let entry = selected.borrow::<FileEntry>();
+            Some((entry.file.clone(), entry.name.clone(), entry.is_directory))
         } else {
             None
         };
@@ -1273,7 +1262,7 @@ impl Tab {
         let caption = gtk::Label::new(Some("Имя"));
         caption.set_xalign(0.0);
         let entry = gtk::Entry::builder().activates_default(true).build();
-        if let Some((_, original)) = &target {
+        if let Some((_, original, _)) = &target {
             entry.set_text(original);
         }
         let picker = if matches!(action, NamePrompt::Create(CreateKind::File))
@@ -1315,7 +1304,10 @@ impl Tab {
         dialog.set_child(Some(&content));
         dialog.set_default_widget(Some(&save));
         GtkWindowExt::set_focus(&dialog, Some(&entry));
-        entry.select_region(0, -1);
+        let selection_end = target.as_ref().map_or(-1, |(_, name, is_directory)| {
+            rename_selection_end(name, *is_directory)
+        });
+        entry.select_region(0, selection_end);
 
         let weak_save = save.downgrade();
         entry.connect_changed(move |entry| {
@@ -1349,7 +1341,7 @@ impl Tab {
                     kind,
                     picker.as_ref().and_then(templates::Picker::selected),
                 ),
-                (NamePrompt::Rename, Some((file, original))) if *original != name => {
+                (NamePrompt::Rename, Some((file, original, _))) if *original != name => {
                     Operation::Rename(file.clone(), name)
                 }
                 _ => return,
@@ -1549,6 +1541,29 @@ enum Operation {
     Trash(Vec<gio::File>),
 }
 
+fn rename_selection_end(name: &str, is_directory: bool) -> i32 {
+    let path = Path::new(name);
+    if !is_directory
+        && path
+            .extension()
+            .is_some_and(|extension| !extension.is_empty())
+        && let Some(stem) = path.file_stem().and_then(|stem| stem.to_str())
+    {
+        stem.chars().count() as i32
+    } else {
+        -1
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn rename_selection_uses_character_offsets_and_leaves_the_last_extension() {
+    assert_eq!(rename_selection_end("отчёт.tar.gz", false), 9);
+    assert_eq!(rename_selection_end(".gitignore", false), -1);
+    assert_eq!(rename_selection_end("folder.with.dot", true), -1);
+    assert_eq!(rename_selection_end("trailing.", false), -1);
+}
+
 pub fn icon_button(icon: &str, tooltip: &str) -> gtk::Button {
     let button = gtk::Button::builder()
         .icon_name(icon)
@@ -1566,7 +1581,7 @@ fn file_scroller(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
         .build()
 }
 
-fn unparent_popup(popup: &gtk::Popover) {
+pub(crate) fn unparent_popup(popup: &gtk::Popover) {
     let popup = popup.clone();
     glib::idle_add_local_once(move || {
         if popup.parent().is_some() {

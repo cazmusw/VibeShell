@@ -793,6 +793,32 @@ def run(args, env, root, children, logs, ctl, wait, windows):
     wait(lambda: ctl("logs").stdout.count(error_event) > error_count)
     assert list(from_template.iterdir()) == [instance]
     preview("preview-files-template-unavailable.png")
+
+    shortcuts = home / "shortcuts"
+    shortcuts.mkdir()
+    open_folder(shortcuts)
+    (shortcuts / "original.txt").write_text("Keep the extension\n")
+    click(684, 414, 273)
+    time.sleep(.3)
+    preview("preview-files-refresh-context.png")
+    click(684, 537, settle=.2)
+    time.sleep(.45)
+    click(420, 264)
+    send("-k", "F2")
+    files_modal(main_window)
+    send("renamed", "-s", "100", "-k", "Return")
+    renamed = shortcuts / "renamed.txt"
+    wait(renamed.is_file, seconds=4)
+    time.sleep(.35)
+    click(420, 264)
+    control("x")
+    click(210, 143)
+    time.sleep(.4)
+    control("v")
+    wait((home / renamed.name).is_file, seconds=4)
+    assert not renamed.exists()
+    assert (home / renamed.name).read_text() == "Keep the extension\n"
+
     open_folder(desktop_folder)
     control("d")
     wait(lambda: tomllib.loads(bookmarks.read_text())["folders"] == [str(notes), str(desktop_folder)])
@@ -810,6 +836,55 @@ def run(args, env, root, children, logs, ctl, wait, windows):
     wait(lambda: not tomllib.loads(bookmarks.read_text())["folders"])
     ctl("window", "close", *restored_window[:2])
     assert app.wait(timeout=5) == 0
+
+    tab_folders = [home / name for name in ("Aa", "Bb", "Cc", "Dd", "Ee")]
+    for folder in tab_folders:
+        folder.mkdir()
+    app = subprocess.Popen([args.files, *(folder.as_uri() for folder in tab_folders)],
+                           env=files_env, stdout=log, stderr=log)
+    children.append(app)
+    main_window = wait(lambda: (active := active_window()) and active[2] == '"org.mosaic.Files"' and active)
+    time.sleep(.5)
+
+    def tab_action(x, row):
+        click(x, 98, 273, settle=.2)
+        time.sleep(.25)
+        click(x, row, settle=.2)
+        time.sleep(.25)
+
+    # Refresh Bb while Ee is active, then inspect the newly enumerated file.
+    external = tab_folders[1] / "external.txt"
+    external.write_text("New tab content\n")
+    tab_action(544, 319)
+    click(544, 98)
+    time.sleep(.35)
+    click(420, 264)
+    send("-k", "F2")
+    files_modal(main_window)
+    send("-k", "Escape")
+    wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+    click(934, 98)
+    time.sleep(.25)
+
+    # Bb moves from the second position to the third, so closing to its right
+    # must preserve Aa and Cc, even when the rightmost tab was active.
+    click(505, 98, 273, settle=.2)
+    time.sleep(.25)
+    preview("preview-files-tab-menu.png")
+    click(505, 153, settle=.2)
+    time.sleep(.25)
+    tab_action(674, 287)
+    click(804, 98)  # The former fourth slot is now empty.
+    create_folder(tab_folders[1], "after-close-right")
+    tab_action(544, 257)
+    click(414, 98)  # Cc is now the first tab.
+    create_folder(tab_folders[2], "after-close-left")
+    tab_action(544, 121)
+    tab_action(414, 225)
+    create_folder(tab_folders[1], "after-close-others")
+    tab_action(414, 193)
+    assert app.wait(timeout=5) == 0
+
     pointer.stdin.write("quit\n")
     pointer.stdin.flush()
     assert pointer.wait(timeout=5) == 0
@@ -841,6 +916,10 @@ def run(args, env, root, children, logs, ctl, wait, windows):
               "permissions_nonowner_error": nonowner,
               "created_file_from_xdg_template": True,
               "template_cancel_conflict_and_unavailable": True,
+              "rename_keeps_extension_and_file_shortcuts_work_after_sidebar_navigation": True,
+              "context_refresh_reads_external_changes": True,
+              "tab_context_moves_and_closes_relative_to_selected_tab": True,
+              "tab_context_refresh_reads_its_own_directory": True,
               "access_denied_offer_cancelled": not os.geteuid() == 0}
     Path(args.report).with_name("files.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)

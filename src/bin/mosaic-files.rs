@@ -24,14 +24,14 @@ mod templates;
 mod transfer;
 
 use bookmarks::Bookmarks;
-use gtk::{gdk, gio, glib, prelude::*};
+use gtk::{gdk, gio, glib, graphene, prelude::*};
 use mosaic_shell_tools::diagnostics;
 use std::{
     cell::RefCell,
     path::Path,
     rc::{Rc, Weak},
 };
-use tab::{Clipboard, Command, Tab, icon_button};
+use tab::{Clipboard, Command, Tab, icon_button, unparent_popup};
 
 const APPLICATION_ID: &str = "org.mosaic.Files";
 
@@ -119,6 +119,18 @@ struct Browser {
     bookmarks: RefCell<Result<Bookmarks, std::io::Error>>,
     pinned: gtk::Box,
     archive_copies: archives::OpenCopies,
+    tab_menu: RefCell<Option<gtk::Popover>>,
+}
+
+#[derive(Clone, Copy)]
+enum TabAction {
+    MoveLeft,
+    MoveRight,
+    Close,
+    CloseOthers,
+    CloseLeft,
+    CloseRight,
+    Refresh,
 }
 
 impl Browser {
@@ -156,6 +168,7 @@ impl Browser {
             bookmarks: RefCell::new(Bookmarks::load()),
             pinned: gtk::Box::new(gtk::Orientation::Vertical, 4),
             archive_copies: Default::default(),
+            tab_menu: RefCell::default(),
         });
         let content = gtk::Paned::builder()
             .orientation(gtk::Orientation::Horizontal)
@@ -172,10 +185,18 @@ impl Browser {
         let keep_alive = browser.clone();
         window.connect_close_request(move |_| {
             // The window owns the controller, and the controller holds the window weakly.
-            let _ = &keep_alive;
+            let menu = keep_alive.tab_menu.take();
+            if let Some(menu) = menu {
+                menu.popdown();
+                if menu.parent().is_some() {
+                    menu.unparent();
+                }
+            }
             glib::Propagation::Proceed
         });
         browser.install_actions(&window);
+        browser.install_file_keys(&window);
+        browser.install_tab_menu();
         (browser, window)
     }
 
@@ -392,6 +413,72 @@ impl Browser {
         window.add_action(&action);
     }
 
+    fn install_file_keys(self: &Rc<Self>, window: &gtk::ApplicationWindow) {
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let browser = Rc::downgrade(self);
+        let weak_window = window.downgrade();
+        keys.connect_key_pressed(move |_, key, _, modifiers| {
+            let relevant = gdk::ModifierType::CONTROL_MASK
+                | gdk::ModifierType::SHIFT_MASK
+                | gdk::ModifierType::ALT_MASK
+                | gdk::ModifierType::SUPER_MASK;
+            if modifiers & relevant != gdk::ModifierType::CONTROL_MASK
+                || weak_window
+                    .upgrade()
+                    .and_then(|window| GtkWindowExt::focus(&window))
+                    .is_some_and(|focus| {
+                        focus.is::<gtk::Editable>()
+                            || focus
+                                .downcast_ref::<gtk::Label>()
+                                .is_some_and(gtk::Label::is_selectable)
+                    })
+            {
+                return glib::Propagation::Proceed;
+            }
+            browser
+                .upgrade()
+                .and_then(|browser| browser.current_tab())
+                .map_or(glib::Propagation::Proceed, |tab| tab.handle_file_key(key))
+        });
+        window.add_controller(keys);
+    }
+
+    fn install_tab_menu(self: &Rc<Self>) {
+        let menu = gtk::GestureClick::new();
+        menu.set_button(gdk::BUTTON_SECONDARY);
+        menu.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = Rc::downgrade(self);
+        menu.connect_pressed(move |gesture, _, x, y| {
+            let Some(browser) = weak.upgrade() else {
+                return;
+            };
+            let point = graphene::Point::new(x as f32, y as f32);
+            let tab = browser
+                .tabs
+                .borrow()
+                .iter()
+                .find(|tab| {
+                    browser.notebook.tab_label(&tab.page).is_some_and(|label| {
+                        let header = label
+                            .parent()
+                            .filter(|parent| parent.css_name() == "tab")
+                            .unwrap_or(label);
+                        header.is_mapped()
+                            && header
+                                .compute_bounds(&browser.notebook)
+                                .is_some_and(|bounds| bounds.contains_point(&point))
+                    })
+                })
+                .cloned();
+            if let Some(tab) = tab {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                browser.show_tab_menu(&tab, point);
+            }
+        });
+        self.notebook.add_controller(menu);
+    }
+
     fn add_tab(self: &Rc<Self>, directory: gio::File) -> Rc<Tab> {
         let tab = Tab::new(&directory, self.clipboard.clone(), Rc::downgrade(self));
         let label = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -424,15 +511,146 @@ impl Browser {
     }
 
     fn close_tab(&self, tab: &Rc<Tab>) {
+        let Some(page) = self.notebook.page_num(&tab.page) else {
+            return;
+        };
         if self.notebook.n_pages() == 1 {
             if let Some(window) = self.window.upgrade() {
                 window.close();
             }
-        } else if let Some(page) = self.notebook.page_num(&tab.page) {
+        } else {
+            self.remove_page(page);
+        }
+    }
+
+    fn remove_page(&self, page: u32) {
+        if let Some(widget) = self.notebook.nth_page(Some(page)) {
             self.notebook.remove_page(Some(page));
             self.tabs
                 .borrow_mut()
-                .retain(|current| !Rc::ptr_eq(current, tab));
+                .retain(|tab| tab.page.upcast_ref::<gtk::Widget>() != &widget);
+        }
+    }
+
+    fn show_tab_menu(self: &Rc<Self>, tab: &Rc<Tab>, point: graphene::Point) {
+        let Some(index) = self.notebook.page_num(&tab.page) else {
+            return;
+        };
+        let count = self.notebook.n_pages();
+        let old = self.tab_menu.borrow_mut().take();
+        if let Some(old) = old {
+            old.popdown();
+            unparent_popup(&old);
+        }
+        let menu = gtk::Box::new(gtk::Orientation::Vertical, 1);
+        menu.add_css_class("files-context-actions");
+        let popup = gtk::Popover::new();
+        popup.add_css_class("files-context-menu");
+        popup.set_has_arrow(false);
+        popup.set_position(gtk::PositionType::Bottom);
+        popup.set_pointing_to(Some(&gdk::Rectangle::new(
+            point.x() as i32,
+            point.y() as i32,
+            1,
+            1,
+        )));
+        popup.set_child(Some(&menu));
+        popup.set_parent(&self.notebook);
+
+        for (section_number, items) in [
+            &[
+                ("Переместить влево", TabAction::MoveLeft, index > 0),
+                (
+                    "Переместить вправо",
+                    TabAction::MoveRight,
+                    index + 1 < count,
+                ),
+            ][..],
+            &[
+                ("Закрыть вкладку", TabAction::Close, true),
+                ("Закрыть другие вкладки", TabAction::CloseOthers, count > 1),
+                ("Закрыть вкладки слева", TabAction::CloseLeft, index > 0),
+                (
+                    "Закрыть вкладки справа",
+                    TabAction::CloseRight,
+                    index + 1 < count,
+                ),
+                ("Обновить", TabAction::Refresh, true),
+            ],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if section_number != 0 {
+                menu.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+            }
+            for &(name, action, enabled) in items {
+                let button = gtk::Button::with_label(name);
+                button.add_css_class("flat");
+                button.set_sensitive(enabled);
+                if let Some(label) = button.child().and_downcast::<gtk::Label>() {
+                    label.set_xalign(0.0);
+                }
+                let browser = Rc::downgrade(self);
+                let target = Rc::downgrade(tab);
+                let weak_popup = popup.downgrade();
+                button.connect_clicked(move |_| {
+                    if let Some(popup) = weak_popup.upgrade() {
+                        popup.popdown();
+                    }
+                    let browser = browser.clone();
+                    let target = target.clone();
+                    glib::idle_add_local_once(move || {
+                        if let (Some(browser), Some(target)) = (browser.upgrade(), target.upgrade())
+                        {
+                            browser.run_tab_action(&target, action);
+                        }
+                    });
+                });
+                menu.append(&button);
+            }
+        }
+        let browser = Rc::downgrade(self);
+        popup.connect_closed(move |popup| {
+            if let Some(browser) = browser.upgrade() {
+                let mut current = browser.tab_menu.borrow_mut();
+                if current.as_ref() == Some(popup) {
+                    current.take();
+                }
+            }
+            unparent_popup(popup);
+        });
+        self.tab_menu.replace(Some(popup.clone()));
+        popup.popup();
+    }
+
+    fn run_tab_action(&self, tab: &Rc<Tab>, action: TabAction) {
+        let Some(index) = self.notebook.page_num(&tab.page) else {
+            return;
+        };
+        let count = self.notebook.n_pages();
+        let pages = match action {
+            TabAction::MoveLeft => {
+                if index > 0 {
+                    self.notebook.reorder_child(&tab.page, Some(index - 1));
+                }
+                return;
+            }
+            TabAction::MoveRight => {
+                if index + 1 < count {
+                    self.notebook.reorder_child(&tab.page, Some(index + 1));
+                }
+                return;
+            }
+            TabAction::Close => return self.close_tab(tab),
+            TabAction::Refresh => return tab.command(Command::Refresh),
+            TabAction::CloseOthers => 0..count,
+            TabAction::CloseLeft => 0..index,
+            TabAction::CloseRight => index + 1..count,
+        };
+        self.notebook.set_current_page(Some(index));
+        for page in pages.rev().filter(|page| *page != index) {
+            self.remove_page(page);
         }
     }
 }
