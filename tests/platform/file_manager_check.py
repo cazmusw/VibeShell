@@ -493,6 +493,19 @@ def run(args, env, root, children, logs, ctl, wait, windows):
     subprocess.run([args.files, str(notes / sensitive)], env=files_env, check=True, timeout=5)
     wait(lambda: '\tfiles\topen_directory_failed\t' in ctl("logs").stdout)
     assert sensitive not in ctl("logs").stdout
+    if args.grim:
+        def sidebar_sample():
+            return subprocess.check_output([args.grim, "-g", "293,543 53x18", "-"],
+                                           env=env, timeout=5)
+
+        before_narrowing = sidebar_sample()
+        drag([(360, 402), (326, 402), (298, 402), (278, 402)])
+        pointer_command("button 272 0")
+        wait(lambda: sidebar_sample() != before_narrowing, seconds=4)
+        preview("preview-files-narrow-sidebar.png")
+        drag([(278, 402), (298, 402), (326, 402), (360, 402)])
+        pointer_command("button 272 0")
+        wait(lambda: sidebar_sample() == before_narrowing, seconds=4)
     ctl("window", "close", *main_window[:2])
     assert app.wait(timeout=5) == 0
     app = subprocess.Popen([args.files, notes.as_uri()], env=files_env, stdout=log, stderr=log)
@@ -524,6 +537,7 @@ def run(args, env, root, children, logs, ctl, wait, windows):
               "empty_folder_context_creation_and_selection": True, "create_inside_nested_folder": True,
               "table_and_grid_marquee_select_mixed_entries": True,
               "bookmarks_survive_restart_and_toggle_off": True,
+              "sidebar_narrows_and_widens": bool(args.grim),
               "access_denied_offer_cancelled": not os.geteuid() == 0}
     Path(args.report).with_name("files.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)

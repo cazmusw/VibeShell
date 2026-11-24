@@ -1,7 +1,6 @@
 .mosaic-files .files-places {
     padding: 18px 10px 10px;
     background-color: alpha(currentColor, 0.05);
-    border-right: 1px solid alpha(currentColor, 0.12);
 }
 
 .mosaic-files .files-places-heading {

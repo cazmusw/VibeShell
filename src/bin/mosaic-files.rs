@@ -145,9 +145,16 @@ impl Browser {
             bookmarks: RefCell::new(Bookmarks::load()),
             pinned: gtk::Box::new(gtk::Orientation::Vertical, 4),
         });
-        let content = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        content.append(&browser.places());
-        content.append(&browser.notebook);
+        let content = gtk::Paned::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .start_child(&browser.places())
+            .end_child(&browser.notebook)
+            .position(216)
+            .wide_handle(true)
+            .resize_start_child(false)
+            .shrink_start_child(false)
+            .shrink_end_child(false)
+            .build();
         window.set_child(Some(&content));
 
         let keep_alive = browser.clone();
@@ -225,7 +232,7 @@ impl Browser {
         );
         gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
-            .min_content_width(184)
+            .min_content_width(72)
             .child(&places)
             .build()
     }
@@ -296,6 +303,7 @@ impl Browser {
         }
         let title = gtk::Label::new(Some("Закреплённые"));
         title.set_xalign(0.0);
+        title.set_ellipsize(gtk::pango::EllipsizeMode::End);
         title.add_css_class("files-places-heading");
         self.pinned.append(&title);
         for path in paths {
