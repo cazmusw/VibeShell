@@ -67,6 +67,13 @@ def wait(check,seconds=12):
 with tempfile.TemporaryDirectory(prefix='mosaic-vertical-') as directory:
     root=Path(directory);runtime=root/'runtime';runtime.mkdir(mode=0o700)
     cfg=root/'labwc';cfg.mkdir();(cfg/'rc.xml').write_text('<labwc_config/>\n');(cfg/'autostart').write_text('');(cfg/'environment').write_text('')
+    if a.files:
+        (cfg/'rc.xml').write_text(
+            '<labwc_config><windowRules>'
+            '<windowRule identifier="org.mosaic.TransferReceiver">'
+            '<action name="MoveTo" x="930" y="400" />'
+            '<action name="ToggleAlwaysOnTop" />'
+            '</windowRule></windowRules></labwc_config>\n')
     if a.alt_tab:
         subprocess.run([sys.executable, a.alt_tab, '--config', cfg/'rc.xml', '--apply'],
                        check=True, timeout=5)

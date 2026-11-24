@@ -902,8 +902,8 @@ impl Tab {
             }
             Command::Trash if self.trash.is_sensitive() => self.confirm_trash(),
             Command::Clip(kind) if self.copy.is_sensitive() => {
-                if let Some(sources) = self
-                    .selected_files()
+                let files = self.selected_files();
+                if let Some(sources) = files
                     .iter()
                     .map(gio::File::path)
                     .collect::<Option<Vec<_>>>()
@@ -911,6 +911,12 @@ impl Tab {
                 {
                     *self.clipboard.entry.borrow_mut() = Some(Batch { sources, kind });
                     self.clipboard.sync();
+                    if kind == Kind::Copy
+                        && let Err(error) =
+                            self.page.clipboard().set_content(Some(&file_offer(&files)))
+                    {
+                        self.show_error("Не удалось скопировать файлы в системный буфер", &error);
+                    }
                 }
             }
             Command::Paste if self.paste.is_sensitive() => self.paste_selection(),
@@ -1468,11 +1474,72 @@ fn unparent_popup(popup: &gtk::Popover) {
     });
 }
 
-fn connect_item_context(
+fn file_offer(files: &[gio::File]) -> gdk::ContentProvider {
+    gdk::ContentProvider::for_value(&gdk::FileList::from_array(files).to_value())
+}
+
+fn connect_item_actions(
     item: &gtk::ListItem,
     widget: &impl IsA<gtk::Widget>,
     context: &ItemContext,
 ) {
+    // A row drag must claim the motion before the view's rubber band does.
+    let gesture = gtk::GestureDrag::new();
+    let started = Rc::new(Cell::new(false));
+    let reset = started.clone();
+    gesture.connect_drag_begin(move |_, _, _| reset.set(false));
+    let drag_item = item.downgrade();
+    let drag_context = context.clone();
+    gesture.connect_drag_update(move |gesture, dx, dy| {
+        let (Some(tab), Some(item), Some(widget), Some(device)) = (
+            drag_context.borrow().upgrade(),
+            drag_item.upgrade(),
+            gesture.widget(),
+            gesture.device(),
+        ) else {
+            return;
+        };
+        if started.get()
+            || !widget.drag_check_threshold(0, 0, dx.round() as i32, dy.round() as i32)
+            || tab.loading()
+            || tab.mutating.get()
+        {
+            return;
+        }
+        let position = item.position();
+        let files = if tab.selection.is_selected(position) {
+            tab.selected_files()
+        } else {
+            let Some((file, _)) = tab.entry_target(position) else {
+                return;
+            };
+            vec![file]
+        };
+        if files.is_empty() || files.iter().any(|file| file.path().is_none()) {
+            return;
+        }
+        let Some(surface) = widget.native().and_then(|native| native.surface()) else {
+            return;
+        };
+        if let Some(drag) = gdk::Drag::begin(
+            &surface,
+            &device,
+            &file_offer(&files),
+            gdk::DragAction::COPY,
+            dx,
+            dy,
+        ) {
+            started.set(true);
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            let icon = gtk::Image::from_icon_name("text-x-generic-symbolic");
+            icon.set_pixel_size(32);
+            gtk::DragIcon::for_drag(&drag).set_child(Some(&icon));
+            drag.connect_cancel(|drag, _| drag.drop_done(false));
+            drag.connect_dnd_finished(|drag| drag.drop_done(true));
+        }
+    });
+    widget.add_controller(gesture);
+
     let actions = gio::SimpleActionGroup::new();
     let activate =
         gio::SimpleAction::new("menu", Some(<(f64, f64)>::static_variant_type().as_ref()));
@@ -1521,7 +1588,7 @@ fn file_factory(tile: bool, context: &ItemContext) -> gtk::SignalListItemFactory
         name.set_ellipsize(pango::EllipsizeMode::End);
         row.append(&icon);
         row.append(&name);
-        connect_item_context(item, &row, &context);
+        connect_item_actions(item, &row, &context);
         item.set_child(Some(&row));
     });
     factory.connect_bind(|_, item| {
@@ -1621,7 +1688,7 @@ fn details_column(
             label.add_css_class("files-detail");
             label.set_xalign(0.0);
             label.set_ellipsize(pango::EllipsizeMode::End);
-            connect_item_context(item, &label, &context);
+            connect_item_actions(item, &label, &context);
             item.set_child(Some(&label));
         }
     });

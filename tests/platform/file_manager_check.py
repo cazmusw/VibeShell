@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import select
 import subprocess
+import sys
 import time
 import tomllib
 
@@ -129,6 +130,79 @@ def run(args, env, root, children, logs, ctl, wait, windows):
         for x, y in points[1:]:
             pointer_command(f"move {x} {y}")
             time.sleep(.07)
+
+    transfer = home / "external-transfer"
+    transfer.mkdir()
+    transfer_files = [transfer / name for name in ("a with spaces.txt", "b.txt", "я.txt")]
+    for file in transfer_files:
+        file.write_text(file.name)
+
+    received = root / "external-transfers.jsonl"
+    receiver = subprocess.Popen(
+        [sys.executable, str(Path(__file__).with_name("file_transfer_receiver.py")), str(received)],
+        env=env,
+    )
+    children.append(receiver)
+    receiver_window = wait(lambda: (active := active_window())
+                           and active[2] == '"org.mosaic.TransferReceiver"' and active)
+
+    def activate(win):
+        ctl("window", "activate", *win[:2])
+        wait(lambda: (active := active_window()) and active[:2] == win[:2])
+        time.sleep(.2)
+
+    def expect_transfer(kind, value, index):
+        events = wait(lambda: received.exists()
+                      and len(lines := received.read_text().splitlines()) > index
+                      and lines)
+        assert json.loads(events[index]) == [kind, value], events[index]
+
+    def drop_on_receiver(x, y):
+        drag([(x, y), (x + 45, y + 10), (810, 355), (975, 450), (1020, 478)])
+        pointer_command("button 272 0")
+
+    uris = [file.as_uri() for file in transfer_files]
+    activate(main_window)
+    open_folder(transfer)
+    click(420, 264)
+    control("a")
+    control("c")
+    activate(receiver_window)
+    control("v")
+    expect_transfer("paste", uris, 0)
+
+    activate(main_window)
+    drop_on_receiver(420, 264)
+    expect_transfer("drag", uris, 1)
+
+    activate(main_window)
+    control("2")
+    time.sleep(.3)
+    click(446, 282)
+    drop_on_receiver(598, 282)
+    expect_transfer("drag", [uris[1]], 2)
+
+    activate(main_window)
+    drag([(446, 282), (491, 292), (810, 355), (1204, 391), (1230, 404)])
+    pointer_command("button 272 0")
+    time.sleep(.25)
+    assert len(received.read_text().splitlines()) == 3
+
+    activate(main_window)
+    control("l")
+    send("clipboard text")
+    control("a")
+    control("c")
+    activate(receiver_window)
+    send("-M", "ctrl", "-M", "shift", "-k", "v", "-m", "shift", "-m", "ctrl")
+    expect_transfer("text", "clipboard text", 3)
+    assert all(file.read_text() == file.name for file in transfer_files)
+    ctl("window", "close", *receiver_window[:2])
+    assert receiver.wait(timeout=5) == 0
+    activate(main_window)
+    send("-k", "Escape")
+    control("w")
+    time.sleep(.35)
 
     drag([(624, 420), (597, 395), (535, 337), (470, 287), (392, 248)])
     preview("preview-files-marquee-table.png")
@@ -439,6 +513,7 @@ def run(args, env, root, children, logs, ctl, wait, windows):
     result = {"passed": True, "uri_open": True, "new_folder": True,
               "parent_back_forward_address": True, "independent_tabs": True, "dock_registration": True,
               "copy_and_move_between_tabs": True, "conflict_cancel_and_keep_both": True,
+              "files_pasted_and_dropped_in_external_window": True, "text_copy_preserved": True,
               "sorted_selection_matches_file": True, "private_directory_error_in_journal": True,
               "shift_range_ctrl_toggle_and_group_copy": True, "group_trash_confirmed": True,
               "partial_move_resumes_without_repeating": True,

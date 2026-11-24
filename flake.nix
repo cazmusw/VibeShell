@@ -207,7 +207,11 @@
           --alt-tab ${tools}/bin/mosaic-alt-tab --grim ${pkgs.grim}/bin/grim --report $out/vertical.json
       '';
       filesCheck = pkgs.runCommand "mosaic-files" {
-        nativeBuildInputs = [ pkgs.python3 pkgs.dbus pkgs.systemd ];
+        nativeBuildInputs = [
+          (pkgs.python3.withPackages (ps: [ ps.pygobject3 ]))
+          pkgs.gobject-introspection pkgs.dbus pkgs.systemd
+        ];
+        buildInputs = [ pkgs.gtk4 ];
         FONTCONFIG_FILE = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
       } ''
         mkdir -p $out
