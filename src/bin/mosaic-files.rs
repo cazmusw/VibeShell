@@ -18,6 +18,8 @@ mod photos;
 mod properties;
 #[path = "mosaic_files/tab.rs"]
 mod tab;
+#[path = "mosaic_files/templates.rs"]
+mod templates;
 #[path = "mosaic_files/transfer.rs"]
 mod transfer;
 

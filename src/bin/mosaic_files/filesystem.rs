@@ -111,18 +111,22 @@ pub enum CreateKind {
     Folder,
 }
 
-pub async fn create_entry(
-    directory: &gio::File,
-    name: &str,
-    kind: CreateKind,
-) -> Result<gio::File, glib::Error> {
+pub fn named_child(directory: &gio::File, name: &str) -> Result<gio::File, glib::Error> {
     if !valid_name(name) {
         return Err(glib::Error::new(
             gio::IOErrorEnum::InvalidFilename,
             "Некорректное имя",
         ));
     }
-    let target = directory.child_for_display_name(name)?;
+    directory.child_for_display_name(name)
+}
+
+pub async fn create_entry(
+    directory: &gio::File,
+    name: &str,
+    kind: CreateKind,
+) -> Result<gio::File, glib::Error> {
+    let target = named_child(directory, name)?;
     match kind {
         CreateKind::File => {
             let stream = target

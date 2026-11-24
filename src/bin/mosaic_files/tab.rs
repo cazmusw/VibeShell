@@ -4,7 +4,7 @@ use crate::filesystem::{
 };
 use crate::navigation::{History, Navigation};
 use crate::transfer::{self, Batch, Kind, TransferError};
-use crate::{Browser, admin, archives, photos, properties};
+use crate::{Browser, admin, archives, photos, properties, templates};
 use glib::translate::IntoGlib;
 use gtk::{gdk, gio, glib, pango, prelude::*};
 use std::{
@@ -1276,6 +1276,13 @@ impl Tab {
         if let Some((_, original)) = &target {
             entry.set_text(original);
         }
+        let picker = if matches!(action, NamePrompt::Create(CreateKind::File))
+            && directory.path().is_some()
+        {
+            templates::Picker::add(&content, &entry)
+        } else {
+            None
+        };
         caption.set_mnemonic_widget(Some(&entry));
         content.append(&caption);
         content.append(&entry);
@@ -1337,7 +1344,11 @@ impl Tab {
             }
             dialog.close();
             let action = match (action, &target) {
-                (NamePrompt::Create(kind), _) => Operation::Create(name, kind),
+                (NamePrompt::Create(kind), _) => Operation::Create(
+                    name,
+                    kind,
+                    picker.as_ref().and_then(templates::Picker::selected),
+                ),
                 (NamePrompt::Rename, Some((file, original))) if *original != name => {
                     Operation::Rename(file.clone(), name)
                 }
@@ -1397,11 +1408,19 @@ impl Tab {
             let mut trashed = None;
             let mut created = None;
             let (result, event, message) = match operation {
-                Operation::Create(name, kind) => {
-                    let result = filesystem::create_entry(&directory, &name, kind)
-                        .await
-                        .map(|file| created = Some(file));
+                Operation::Create(name, kind, template) => {
+                    let from_template = template.is_some();
+                    let result = match template {
+                        Some(path) => templates::create(&directory, &name, path).await,
+                        None => filesystem::create_entry(&directory, &name, kind).await,
+                    }
+                    .map(|file| created = Some(file));
                     match kind {
+                        CreateKind::File if from_template => (
+                            result,
+                            "create_from_template_failed",
+                            "Не удалось создать файл из шаблона",
+                        ),
                         CreateKind::File => {
                             (result, "create_file_failed", "Не удалось создать файл")
                         }
@@ -1525,7 +1544,7 @@ enum NamePrompt {
 }
 
 enum Operation {
-    Create(glib::GString, CreateKind),
+    Create(glib::GString, CreateKind, Option<PathBuf>),
     Rename(gio::File, glib::GString),
     Trash(Vec<gio::File>),
 }

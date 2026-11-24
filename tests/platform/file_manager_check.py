@@ -27,6 +27,13 @@ def run(args, env, root, children, logs, ctl, wait, windows):
     wait(lambda: desktop_id in tomllib.loads(ctl("config", "get").stdout)["pins"])
     ctl("unpin", desktop_id)
     files_env = dict(env, HOME=str(home))
+    template_dir = home / "Templates"
+    template_dir.mkdir()
+    template = template_dir / "Letter.txt"
+    template.write_bytes(b"Template text\n\x00End\n")
+    (Path(files_env["XDG_CONFIG_HOME"]) / "user-dirs.dirs").write_text(
+        'XDG_TEMPLATES_DIR="$HOME/Templates"\n'
+    )
     if args.mime_data:
         files_env["XDG_DATA_DIRS"] += ":" + args.mime_data
     launched_file = home / "opened-from-zip"
@@ -727,6 +734,52 @@ def run(args, env, root, children, logs, ctl, wait, windows):
         assert readonly.stat().st_mode == readonly_stat.st_mode
         preview("preview-files-permissions-denied.png")
         close_file_properties()
+
+    from_template = home / "from-template"
+    from_template.mkdir()
+    open_folder(from_template)
+
+    def choose_template():
+        click(684, 414, 273)
+        time.sleep(.3)
+        click(684, 436, settle=.2)
+        files_modal(main_window)
+        time.sleep(.35)
+        send("-M", "shift", "-k", "Tab", "-m", "shift", "-k", "space", "-k", "Down", "-k", "Return")
+        send("-k", "Tab")
+
+    def create_instance(name):
+        control("a")
+        send(name, "-s", "100", "-k", "Return")
+        wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+
+    choose_template()
+    preview("preview-files-template.png")
+    create_instance("copy.txt")
+    instance = from_template / "copy.txt"
+    wait(instance.is_file, seconds=4)
+    assert instance.read_bytes() == template.read_bytes()
+
+    choose_template()
+    send("-k", "Escape")
+    wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+    assert list(from_template.iterdir()) == [instance]
+
+    instance.write_bytes(b"Keep existing content")
+    error_event = '\tfiles\tcreate_from_template_failed\t'
+    error_count = ctl("logs").stdout.count(error_event)
+    choose_template()
+    create_instance(instance.name)
+    wait(lambda: ctl("logs").stdout.count(error_event) > error_count)
+    assert instance.read_bytes() == b"Keep existing content"
+
+    error_count = ctl("logs").stdout.count(error_event)
+    choose_template()
+    template.unlink()
+    create_instance("missing-template.txt")
+    wait(lambda: ctl("logs").stdout.count(error_event) > error_count)
+    assert list(from_template.iterdir()) == [instance]
+    preview("preview-files-template-unavailable.png")
     ctl("window", "close", *main_window[:2])
     assert app.wait(timeout=5) == 0
     app = subprocess.Popen([args.files, notes.as_uri()], env=files_env, stdout=log, stderr=log)
@@ -765,6 +818,8 @@ def run(args, env, root, children, logs, ctl, wait, windows):
               "archive_member_launch_and_context_actions": True,
               "permissions_edited_from_properties": True,
               "permissions_nonowner_error": nonowner,
+              "created_file_from_xdg_template": True,
+              "template_cancel_conflict_and_unavailable": True,
               "access_denied_offer_cancelled": not os.geteuid() == 0}
     Path(args.report).with_name("files.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)
