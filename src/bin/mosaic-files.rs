@@ -8,6 +8,8 @@ mod bookmarks;
 mod filesystem;
 #[path = "mosaic_files/navigation.rs"]
 mod navigation;
+#[path = "mosaic_files/photos.rs"]
+mod photos;
 #[path = "mosaic_files/tab.rs"]
 mod tab;
 #[path = "mosaic_files/transfer.rs"]

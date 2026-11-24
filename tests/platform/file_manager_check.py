@@ -1,13 +1,16 @@
 """Exercise the installed GTK file manager in a private directory and compositor."""
 
+import base64
 import json
 import os
 from pathlib import Path
 import select
+import struct
 import subprocess
 import sys
 import time
 import tomllib
+import zlib
 
 
 def run(args, env, root, children, logs, ctl, wait, windows):
@@ -506,6 +509,78 @@ def run(args, env, root, children, logs, ctl, wait, windows):
         drag([(278, 402), (298, 402), (326, 402), (360, 402)])
         pointer_command("button 272 0")
         wait(lambda: sidebar_sample() == before_narrowing, seconds=4)
+    photos = home / "photos"
+    photos.mkdir()
+    photo = photos / "a.png"
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    def write_photo(path, width, height, rows):
+        header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+        path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+                         + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+    write_photo(photo, 1000, 600, (b"\x00" + b"\xff\x00\x00" * 1000) * 600)
+    # Solid green and blue 1×1 fixtures encoded as JPEG and lossless WebP.
+    (photos / "b.JPEG").write_bytes(base64.b64decode(
+        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIs"
+        "IxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIy"
+        "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAA"
+        "AAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAB//EABQRAQAAAAAAAAAAAAAAAAAA"
+        "AAD/2gAMAwEAAhEDEQA/AKwA0ED/2Q=="
+    ))
+    (photos / "c.webp").write_bytes(base64.b64decode("UklGRhwAAABXRUJQVlA4TA8AAAAvAAAAAAcQ0f/+ByKi/wEA"))
+    (photos / "d-corrupt.png").write_bytes(b"invalid image")
+    write_photo(photos / "e-oversize.png", 12000, 12000, b"")
+
+    def photo_window():
+        return wait(lambda: (active := active_window()) and active[:2] != main_window[:2]
+                    and active[2] == '"org.mosaic.Files"', seconds=4)
+
+    subprocess.run([args.files, photo.as_uri()], env=files_env, check=True, timeout=5)
+    photo_window()
+    send("-k", "Escape")
+    wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+    open_folder(photos)
+    click(806, 264, 273, settle=.2)
+    time.sleep(.3)
+    click(806, 285, settle=.2)
+    photo_window()
+
+    if args.grim:
+        def photo_pixel(x, y):
+            return subprocess.check_output([args.grim, "-t", "ppm", "-g", f"{x},{y} 1x1", "-"],
+                                           env=env, timeout=5)[-3:]
+
+        red = b"\xff\x00\x00"
+        wait(lambda: photo_pixel(640, 360) == red and photo_pixel(345, 360) == red)
+        preview("preview-files-photo.png")
+        send("-k", "minus")
+        wait(lambda: photo_pixel(640, 360) == red and photo_pixel(345, 360) != red)
+        send("-k", "0")
+        wait(lambda: photo_pixel(345, 360) == red)
+        send("-k", "Right")
+        wait(lambda: (rgb := photo_pixel(640, 360))[1] > 240 and rgb[0] < 10 and rgb[2] < 10)
+        send("-k", "Right")
+        wait(lambda: photo_pixel(640, 360) == b"\x00\x00\xff")
+    else:
+        send("-k", "Right", "-k", "Right")
+    send("-k", "Right")
+    wait(lambda: '\tfiles\tphoto_decode_failed\t' in ctl("logs").stdout)
+    preview("preview-files-photo-corrupt.png")
+    send("-k", "Right")
+    wait(lambda: '\tfiles\tphoto_limit_exceeded\t' in ctl("logs").stdout)
+    send("-k", "Left", "-k", "Left")
+    if args.grim:
+        wait(lambda: photo_pixel(640, 360) == b"\x00\x00\xff")
+    send("-k", "Escape")
+    wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
+    click(806, 264, settle=.2)
+    send("-k", "Return")
+    photo_window()
+    send("-k", "Escape")
+    wait(lambda: (active := active_window()) and active[:2] == main_window[:2])
     ctl("window", "close", *main_window[:2])
     assert app.wait(timeout=5) == 0
     app = subprocess.Popen([args.files, notes.as_uri()], env=files_env, stdout=log, stderr=log)
@@ -538,6 +613,8 @@ def run(args, env, root, children, logs, ctl, wait, windows):
               "table_and_grid_marquee_select_mixed_entries": True,
               "bookmarks_survive_restart_and_toggle_off": True,
               "sidebar_narrows_and_widens": bool(args.grim),
+              "built_in_photo_viewer_and_safe_decode_limits": True,
+              "photo_formats_navigation_and_zoom_visible": bool(args.grim),
               "access_denied_offer_cancelled": not os.geteuid() == 0}
     Path(args.report).with_name("files.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)

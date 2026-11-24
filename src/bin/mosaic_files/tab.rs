@@ -4,7 +4,7 @@ use crate::filesystem::{
 };
 use crate::navigation::{History, Navigation};
 use crate::transfer::{self, Batch, Kind, TransferError};
-use crate::{Browser, admin};
+use crate::{Browser, admin, photos};
 use glib::translate::IntoGlib;
 use gtk::{gdk, gio, glib, pango, prelude::*};
 use std::{
@@ -783,6 +783,18 @@ impl Tab {
                     }
                     return;
                 }
+            }
+            if let Some(photo) = photos::Photo::from_file(&file)
+                && let Some(tab) = tab.upgrade()
+                && let Some(parent) = tab.parent_window()
+            {
+                let gallery = (0..tab.selection.n_items())
+                    .filter_map(|position| tab.entry_target(position))
+                    .filter(|(_, directory)| !directory)
+                    .filter_map(|(file, _)| photos::Photo::from_file(&file))
+                    .collect();
+                photos::show(&parent, gallery, photo);
+                return;
             }
             let context = gdk::Display::default().map(|display| display.app_launch_context());
             let result =
