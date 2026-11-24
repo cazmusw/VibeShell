@@ -12,7 +12,7 @@ use std::{
 };
 
 enum Operation {
-    Scan(i64),
+    Scan(Option<i64>),
     Connect {
         network: WifiNetwork,
         active: String,
@@ -31,7 +31,7 @@ impl Operation {
 
     fn outcome(&self, adapter: &WifiAdapter) -> Option<&'static str> {
         match self {
-            Self::Scan(previous) if adapter.last_scan >= 0 && adapter.last_scan != *previous => {
+            Self::Scan(Some(previous)) if adapter.last_scan > *previous => {
                 Some("Список сетей обновлён")
             }
             Self::Connect {
@@ -283,7 +283,7 @@ impl WifiPane {
                     .iter()
                     .find(|adapter| adapter.path == operation.path);
                 let deadline = match operation.operation {
-                    Operation::Scan(_) => Duration::from_secs(14),
+                    Operation::Scan(_) => Duration::from_secs(30),
                     Operation::Connect { .. } => Duration::from_secs(120),
                     Operation::Disconnect => Duration::from_secs(40),
                 };
@@ -466,20 +466,20 @@ impl WifiPane {
     }
 
     fn request_scan(self: &Rc<Self>) {
-        let Some(adapter) = self
+        let Some(path) = self
             .snapshot
             .borrow()
             .as_ref()
             .and_then(|snapshot| self.selected(snapshot))
-            .cloned()
+            .map(|adapter| adapter.path.clone())
         else {
             return;
         };
-        let parameters = (adapter.path.as_str(),).to_variant();
+        let parameters = (path.as_str(),).to_variant();
         self.request(
-            adapter.path,
-            Operation::Scan(adapter.last_scan),
-            "ScanWifi",
+            path,
+            Operation::Scan(None),
+            "ScanWifiWithBaseline",
             parameters,
         );
     }
@@ -582,6 +582,9 @@ impl WifiPane {
             if let Some(pending) = slot.as_mut() {
                 let error = match result {
                     Ok(reply) => {
+                        if let Operation::Scan(baseline) = &mut pending.operation {
+                            *baseline = reply.get::<(i64,)>().map(|(last_scan,)| last_scan);
+                        }
                         if let Operation::Connect { active, .. } = &mut pending.operation {
                             *active = reply
                                 .get::<(String,)>()
@@ -590,7 +593,8 @@ impl WifiPane {
                         }
                         pending.accepted = true;
                         pending.started = Instant::now();
-                        None
+                        matches!(pending.operation, Operation::Scan(None))
+                            .then_some("Не удалось подтвердить запрос NetworkManager")
                     }
                     Err(error) => {
                         let detail = error.to_string();

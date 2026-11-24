@@ -263,7 +263,7 @@ pub fn decode_snapshot(objects: &ManagedObjects) -> WifiSnapshot {
 #[derive(Default)]
 pub struct NetworkService {
     connection: Mutex<Option<Connection>>,
-    scans: Mutex<HashMap<String, Instant>>,
+    scans: Mutex<HashMap<(OwnedUniqueName, String), Instant>>,
     connection_actions: Mutex<HashSet<String>>,
     activations: Mutex<HashMap<String, ActivationWatch>>,
 }
@@ -618,21 +618,20 @@ impl NetworkService {
         Ok(())
     }
 
-    pub async fn scan(&self, path: &str) -> Result<(), crate::ipc::ApiError> {
+    pub async fn scan(&self, path: &str) -> Result<i64, crate::ipc::ApiError> {
         use crate::ipc::ApiError;
-        let (connection, owner, _) = self.action_target(path).await?;
+        let (connection, owner, adapter) = self.action_target(path).await?;
+        let proxy = Proxy::new(&connection, owner.as_str(), path, WIRELESS).await?;
+        let key = (owner.clone(), path.to_owned());
         {
             let now = Instant::now();
             let mut scans = self.scans.lock().unwrap();
             scans.retain(|_, previous| now.saturating_duration_since(*previous) < SCAN_INTERVAL);
-            if scans.contains_key(path) {
+            if scans.contains_key(&key) {
                 return Err(ApiError::Conflict("scan requested too recently".into()));
             }
-            scans.insert(path.to_owned(), now);
+            scans.insert(key.clone(), now);
         }
-        let proxy = Proxy::new(&connection, owner.as_str(), path, WIRELESS)
-            .await
-            .map_err(ApiError::ZBus)?;
         let options: HashMap<&str, Value<'_>> = HashMap::new();
         match proxy
             .call_with_flags::<_, _, ()>(
@@ -642,9 +641,9 @@ impl NetworkService {
             )
             .await
         {
-            Ok(_) => Ok(()),
+            Ok(_) => Ok(adapter.last_scan),
             Err(error) => {
-                self.scans.lock().unwrap().remove(path);
+                self.scans.lock().unwrap().remove(&key);
                 Err(network_error(error))
             }
         }

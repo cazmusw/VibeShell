@@ -168,9 +168,30 @@ def run(args, env, children, ctl, wait, spawn):
     fixture.wait(timeout=4)
     wait(lambda: not status()["available"])
     assert dialog()["kind"] == "wifi"
-    spawn(args.wifi_fixture)
+    fixture = spawn(args.wifi_fixture)
     wait(lambda: status()["available"] and status()["enabled"])
     assert dialog()["kind"] == "wifi"
+
+    def scan_and_check_baseline():
+        baseline = status()["adapters"][0]["last_scan"]
+        scan_reply = subprocess.check_output(
+            ["busctl", "--user", "--json=short", "call", "org.mosaic.Services1",
+             "/org/mosaic/Services1", "org.mosaic.Services1",
+             "ScanWifiWithBaseline", "s", main["path"]],
+            env=env, text=True, timeout=4,
+        )
+        assert json.loads(scan_reply)["data"] == [baseline]
+        wait(lambda: status()["adapters"][0]["last_scan"] > baseline)
+        assert any(network["name"] == "New Test Network"
+                   for network in status()["adapters"][0]["networks"])
+
+    scan_and_check_baseline()
+    fixture.terminate()
+    fixture.wait(timeout=4)
+    wait(lambda: not status()["available"])
+    spawn(args.wifi_fixture)
+    wait(lambda: status()["available"] and status()["enabled"])
+    scan_and_check_baseline()
     subprocess.run([args.wtype, "-s", "100", "-k", "Escape"], env=env, check=True, timeout=5)
     wait(lambda: not dialog()["mapped"])
     ctl("wifi", "show", "HEADLESS-1")
@@ -279,7 +300,8 @@ def run(args, env, children, ctl, wait, spawn):
     result = {
         "passed": True, "opens_from_control_center": True,
         "adapter_inventory": True, "connection_and_deduplication": True,
-        "gtk_scan": True, "scan_cooldown": True, "unmanaged_and_disabled_refused": True,
+        "gtk_scan": True, "scan_uses_backend_baseline": True,
+        "scan_cooldown": True, "unmanaged_and_disabled_refused": True,
         "networkmanager_restart": True, "cli_opens_wifi": True,
         "gtk_disconnect": True, "gtk_connect_saved_network": True,
         "confirmation_waits_for_activation": True, "stale_disconnect_refused": True,

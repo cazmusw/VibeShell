@@ -490,6 +490,9 @@ impl Services {
         self.network.forget_wifi(owner, profile).await
     }
     async fn scan_wifi(&self, adapter: &str) -> Result<(), ApiError> {
+        self.network.scan(adapter).await.map(|_| ())
+    }
+    async fn scan_wifi_with_baseline(&self, adapter: &str) -> Result<i64, ApiError> {
         self.network.scan(adapter).await
     }
     async fn connect_wifi(
