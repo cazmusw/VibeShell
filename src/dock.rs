@@ -1,5 +1,5 @@
 use crate::{
-    dock_model::{self, AutoHide, Event, HoverFrame, HoverMotion},
+    dock_model::{self, AutoHide, Event, HoverFrame, HoverMotion, WindowIndicator},
     settings::{self, DockEdge},
     trash::TrashState,
     zoom_icon::ZoomIcon,
@@ -17,7 +17,7 @@ pub struct Item {
     pub name: String,
     pub custom_icon: Option<String>,
     pub pinned: bool,
-    pub running: bool,
+    pub windows: usize,
     pub active: bool,
     pub pending: bool,
 }
@@ -38,13 +38,14 @@ struct Button {
     custom_icon: Option<String>,
     button: gtk::Button,
     icon: ZoomIcon,
-    indicator: gtk::Label,
+    indicator: Indicator,
     content: gtk::Box,
     pinned: Cell<bool>,
 }
 impl Button {
     fn set_edge(&self, edge: DockEdge) {
         self.icon.set_edge(edge);
+        self.indicator.set_vertical(edge.vertical());
         self.content.set_orientation(if edge.vertical() {
             gtk::Orientation::Horizontal
         } else {
@@ -57,10 +58,80 @@ impl Button {
         });
         if edge == DockEdge::Left {
             self.content
-                .reorder_child_after(&self.indicator, gtk::Widget::NONE);
+                .reorder_child_after(&self.indicator.area, gtk::Widget::NONE);
         } else {
             self.content
                 .reorder_child_after(&self.icon, gtk::Widget::NONE);
+        }
+    }
+}
+
+struct Indicator {
+    area: gtk::DrawingArea,
+    state: Rc<Cell<WindowIndicator>>,
+}
+
+impl Indicator {
+    fn new() -> Self {
+        let area = gtk::DrawingArea::builder()
+            .accessible_role(gtk::AccessibleRole::Presentation)
+            .halign(gtk::Align::Center)
+            .valign(gtk::Align::Center)
+            .can_target(false)
+            .build();
+        area.add_css_class("dock-window-indicator");
+        let state = Rc::new(Cell::new(WindowIndicator::Empty));
+        let drawn = state.clone();
+        area.set_draw_func(move |area, context, width, height| {
+            let center_x = f64::from(width) / 2.;
+            let center_y = f64::from(height) / 2.;
+            let position = |offset| {
+                if width < height {
+                    (center_x, center_y + offset)
+                } else {
+                    (center_x + offset, center_y)
+                }
+            };
+            context.set_source_color(&area.color());
+            match drawn.get() {
+                WindowIndicator::Empty => {}
+                WindowIndicator::Pending => {
+                    context.arc(center_x, center_y, 2.5, 0., std::f64::consts::TAU);
+                    context.set_line_width(1.25);
+                    let _ = context.stroke();
+                }
+                WindowIndicator::Dots { count, overflow } => {
+                    let span = f64::from(count + u8::from(overflow) - 1) * 8.;
+                    for index in 0..count {
+                        let (x, y) = position(f64::from(index) * 8. - span / 2.);
+                        context.arc(x, y, 2.5, 0., std::f64::consts::TAU);
+                        let _ = context.fill();
+                    }
+                    if overflow {
+                        let (x, y) = position(span / 2.);
+                        context.move_to(x - 2.5, y);
+                        context.line_to(x + 2.5, y);
+                        context.move_to(x, y - 2.5);
+                        context.line_to(x, y + 2.5);
+                        context.set_line_width(2.);
+                        let _ = context.stroke();
+                    }
+                }
+            }
+        });
+        Self { area, state }
+    }
+
+    fn set_vertical(&self, vertical: bool) {
+        let (width, height) = if vertical { (16, 32) } else { (32, 16) };
+        self.area.set_content_width(width);
+        self.area.set_content_height(height);
+    }
+
+    fn update(&self, windows: usize, pending: bool) {
+        let next = WindowIndicator::new(windows, pending);
+        if self.state.replace(next) != next {
+            self.area.queue_draw();
         }
     }
 }
@@ -428,8 +499,13 @@ impl Dock {
             }
         }
     }
-    pub fn update(&self, items: Vec<Item>, image: impl Fn(&Item, i32) -> gtk::Widget) {
-        self.0.update(items, image);
+    pub fn update(
+        &self,
+        items: Vec<Item>,
+        image: impl Fn(&Item, i32) -> gtk::Widget,
+        before_rebuild: impl FnOnce(),
+    ) {
+        self.0.update(items, image, before_rebuild);
     }
     pub fn set_trash_state(&self, state: TrashState) {
         self.0.trash_state.set(state);
@@ -707,7 +783,12 @@ impl Inner {
             self.kick();
         }
     }
-    fn update(self: &Rc<Self>, items: Vec<Item>, image: impl Fn(&Item, i32) -> gtk::Widget) {
+    fn update(
+        self: &Rc<Self>,
+        items: Vec<Item>,
+        image: impl Fn(&Item, i32) -> gtk::Widget,
+        before_rebuild: impl FnOnce(),
+    ) {
         let same = self.layout_revision.get() > 0
             && self
                 .buttons
@@ -718,6 +799,8 @@ impl Inner {
                     .iter()
                     .map(|i| (i.id.as_str(), i.pinned, &i.custom_icon)));
         if !same {
+            // Popovers must be detached while their old anchor is still alive.
+            before_rebuild();
             while let Some(child) = self.items.first_child() {
                 self.items.remove(&child);
             }
@@ -736,9 +819,9 @@ impl Inner {
                 let size = self.actual_size.get() as i32;
                 let icon = ZoomIcon::new(&image(item, 80), size);
                 icon.set_halign(gtk::Align::Center);
-                let indicator = gtk::Label::new(Some(" "));
+                let indicator = Indicator::new();
                 col.append(&icon);
-                col.append(&indicator);
+                col.append(&indicator.area);
                 button.set_child(Some(&col));
                 let id = item.id.clone();
                 let weak = Rc::downgrade(self);
@@ -859,22 +942,21 @@ impl Inner {
         }
         for (button, item) in self.buttons.borrow().iter().zip(&items) {
             button.pinned.set(item.pinned);
-            button.button.set_tooltip_text(Some(&item.name));
+            let description = if item.windows == 0 {
+                item.name.clone()
+            } else {
+                format!("{}\nОкон: {}", item.name, item.windows)
+            };
+            button.button.set_tooltip_text(Some(&description));
             button
                 .button
-                .update_property(&[gtk::accessible::Property::Label(&item.name)]);
+                .update_property(&[gtk::accessible::Property::Label(&description)]);
             if item.active {
                 button.button.add_css_class("active");
             } else {
                 button.button.remove_css_class("active");
             }
-            button.indicator.set_text(if item.pending {
-                "◌"
-            } else if item.running {
-                "●"
-            } else {
-                " "
-            });
+            button.indicator.update(item.windows, item.pending);
         }
     }
     fn install_pin_drop(self: &Rc<Self>) {

@@ -126,11 +126,21 @@ def run(args,env,ctl,wait,fixture):
         hover_dock(active)
         wait(lambda:cards()==[w[1]])
         ctl('pin','mosaic-stage-0-probe.desktop')
+        wait(lambda:not cards())
         pinned_layout=dock_state()['layout_revision']
+        send('move 20 200')
+        hover_dock(active)
+        wait(lambda:cards()==[w[1]])
+        send('move 20 200')
         patch('dock.current_output_only=true')
         wait(lambda:not cards())
         assert dock_state()['layout_revision']==pinned_layout
         assert config()['pins']==pins
+        from cards import indicator_marks
+        def marks():
+            output=next(o for o in topology() if o['connector']==active)
+            return indicator_marks(args,env,output,dock_state(active))
+        wait(lambda:marks()==0)
 
         def launched_window():
             for line in ctl('windows').stdout.splitlines():
@@ -153,6 +163,8 @@ def run(args,env,ctl,wait,fixture):
         hover_dock(active)
         wait(lambda:cards()==[w[1]])
         assert dock_state()['layout_revision']==pinned_layout
+        send('move 20 200')
+        wait(lambda:marks()==1)
         send('move 20 200')
         patch('dock.current_output_only=false')
 

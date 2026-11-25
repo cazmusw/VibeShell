@@ -7,6 +7,61 @@ import time
 import tomllib
 
 
+def indicator_marks(args, env, output, dock):
+    x = output['x'] + (output['width'] - dock['width']) // 2 + 28
+    y = output['y'] + output['height'] - 44
+    shot = subprocess.check_output(
+        [args.grim, '-t', 'ppm', '-s', '1', '-g', f'{x},{y} 48x26', '-'],
+        env=env, timeout=5,
+    )
+    magic, size, maximum, pixels = shot.split(b'\n', 3)
+    assert (magic, size, maximum) == (b'P6', b'48 26', b'255')
+    ink = bytes.fromhex('bddaff')
+    columns = {index // 3 % 48 for index in range(0, len(pixels), 3)
+               if pixels[index:index + 3] == ink}
+    return sum(column - 1 not in columns for column in columns)
+
+
+def check_indicators(args, env, ctl, wait, windows):
+    output = tomllib.loads(ctl('outputs').stdout)['outputs'][0]
+
+    def dock():
+        return tomllib.loads(ctl('dock', 'state').stdout)
+
+    def group():
+        return [row for row in windows() if row[2] == '"mosaic-stage-0-probe"']
+
+    def wait_marks(expected):
+        try:
+            wait(lambda: indicator_marks(args, env, output, dock()) == expected)
+        except TimeoutError as error:
+            screenshot = Path(args.report).parent / 'window-indicators-failure.png'
+            subprocess.run([args.grim, '-o', output['connector'], str(screenshot)],
+                           env=env, check=True, timeout=5)
+            actual = indicator_marks(args, env, output, dock())
+            raise AssertionError(f'Expected {expected} marks, saw {actual}: {dock()}') from error
+
+    baseline = dock()
+    wait_marks(0)
+    for expected in range(1, 5):
+        ctl('launch', 'mosaic-stage-0-probe.desktop')
+        wait(lambda: len(group()) == expected)
+        wait_marks(expected)
+    screenshot = Path(args.report).parent / 'preview-window-indicators.png'
+    subprocess.run([args.grim, '-o', output['connector'], str(screenshot)],
+                   env=env, check=True, timeout=5)
+    for expected in reversed(range(4)):
+        row = group()[-1]
+        ctl('window', 'close', *row[:2])
+        wait(lambda: len(group()) == expected)
+        wait_marks(expected)
+    assert all(dock()[key] == baseline[key] for key in ('width', 'height', 'layout_revision'))
+    result = {'passed': True, 'zero_to_three_dots': True, 'three_dots_and_plus': True,
+              'updates_on_close_without_relayout': True}
+    (Path(args.report).parent / 'window-indicators.json').write_text(json.dumps(result) + '\n')
+    print(json.dumps(result), flush=True)
+
+
 def run(args, env, processes, logs, ctl, wait, windows):
     def group():
         return sorted(
@@ -112,6 +167,7 @@ def run(args, env, processes, logs, ctl, wait, windows):
     click()
     wait(lambda: group()[0][3:5] == ["true", "false"])
 
+    send("move 12 400")
     pointer.stdin.write("quit\n")
     pointer.stdin.flush()
     pointer.wait(timeout=3)

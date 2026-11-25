@@ -22,6 +22,8 @@ window.mosaic-dock { background: transparent; --mosaic-dock-contrast: black; }
 }
 .dock-item { background: transparent; border: 1px solid transparent; padding: 4px; min-width: 48px; }
 .dock-item.active { border-color: #80b8ff; background: #36475e; }
+.dock-window-indicator { color: #bddaff; }
+.light .dock-window-indicator { color: #275895; }
 .dock-app-divider { background-color: #8997ad; opacity: .65; }
 .light .dock-app-divider { background-color: #536781; }
 .dock-item:hover, .dock-grid:hover { background: #3d495b; }

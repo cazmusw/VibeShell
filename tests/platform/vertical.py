@@ -265,6 +265,9 @@ with tempfile.TemporaryDirectory(prefix='mosaic-vertical-') as directory:
             run(a,env,children,ctl,wait,root,uri_marker)
         ctl('window','close',epoch,ident);wait(lambda:not fixture())
         assert ctl('window','activate',epoch,ident,ok=False).returncode!=0
+        if a.cards and a.grim:
+            from cards import check_indicators
+            check_indicators(a,env,ctl,wait,windows)
         if a.swaybg:
             from dock_behavior import check_transparency
             check_transparency(a,env,ctl,wait)

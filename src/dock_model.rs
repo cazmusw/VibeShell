@@ -275,6 +275,26 @@ pub fn divider_index(pinned: impl IntoIterator<Item = bool>) -> Option<usize> {
         .position(|pinned| !pinned)
         .filter(|index| *index != 0)
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowIndicator {
+    Empty,
+    Pending,
+    Dots { count: u8, overflow: bool },
+}
+
+impl WindowIndicator {
+    pub fn new(windows: usize, pending: bool) -> Self {
+        match windows {
+            0 if pending => Self::Pending,
+            0 => Self::Empty,
+            _ => Self::Dots {
+                count: windows.min(3) as u8,
+                overflow: windows > 3,
+            },
+        }
+    }
+}
 pub fn fitting_icon_size(requested: u32, count: usize, width: u32) -> u32 {
     let requested = requested.clamp(32, 80);
     if count == 0 {

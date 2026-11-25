@@ -71,7 +71,6 @@ struct DockView {
     popup: RefCell<Option<DockMenu>>,
     cards: RefCell<Option<WindowCards>>,
     cards_timer: RefCell<Option<glib::SourceId>>,
-    order: RefCell<Vec<String>>,
 }
 impl DockView {
     fn new(app: &gtk::Application) -> Rc<Self> {
@@ -82,7 +81,6 @@ impl DockView {
             popup: RefCell::new(None),
             cards: RefCell::new(None),
             cards_timer: RefCell::new(None),
-            order: RefCell::new(Vec::new()),
         })
     }
     fn place(&self, monitor: Option<&gdk::Monitor>) {
@@ -1905,13 +1903,7 @@ impl View {
         let running: Vec<_> = dock_windows.iter().map(|w| self.key(w)).collect();
         let settings = self.settings.borrow();
         let pins = &settings.pins;
-        let order = desktop::dock_order(pins, &running);
-        if order != *dock.order.borrow() {
-            dock.close_cards();
-            dock.close_popup();
-            *dock.order.borrow_mut() = order.clone();
-        }
-        let items = order
+        let items = desktop::dock_order(pins, &running)
             .into_iter()
             .map(|id| {
                 let entry = self.app_entry(&id);
@@ -1938,7 +1930,7 @@ impl View {
                         .dock_icon_key(&id)
                         .and_then(|key| settings.dock_icons.get(key))
                         .cloned(),
-                    running: !group.is_empty(),
+                    windows: group.len(),
                     active: group.iter().any(|w| w.active),
                     pending: self
                         .pending
@@ -1948,21 +1940,28 @@ impl View {
                 }
             })
             .collect();
-        dock.dock.update(items, |item, size| {
-            if let Some(pixels) = item
-                .custom_icon
-                .as_deref()
-                .and_then(|asset| crate::dock_icons::load_png(&self.path, asset, size))
-            {
-                return pixbuf_image(pixels);
-            }
-            image(
-                self.app_entry(&item.id).map(|app| &app.info),
-                &item.id,
-                &item.name,
-                size,
-            )
-        });
+        dock.dock.update(
+            items,
+            |item, size| {
+                if let Some(pixels) = item
+                    .custom_icon
+                    .as_deref()
+                    .and_then(|asset| crate::dock_icons::load_png(&self.path, asset, size))
+                {
+                    return pixbuf_image(pixels);
+                }
+                image(
+                    self.app_entry(&item.id).map(|app| &app.info),
+                    &item.id,
+                    &item.name,
+                    size,
+                )
+            },
+            || {
+                dock.close_cards();
+                dock.close_popup();
+            },
+        );
     }
     fn redraw(self: &Rc<Self>) {
         let windows = self.windows.borrow();

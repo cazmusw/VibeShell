@@ -1,4 +1,46 @@
 use mosaic_shell_tools::dock_model::*;
+
+#[test]
+fn window_indicators_keep_small_groups_and_compact_large_ones() {
+    use WindowIndicator::*;
+    assert_eq!(WindowIndicator::new(0, false), Empty);
+    assert_eq!(WindowIndicator::new(0, true), Pending);
+    assert_eq!(
+        WindowIndicator::new(1, true),
+        Dots {
+            count: 1,
+            overflow: false
+        }
+    );
+    assert_eq!(
+        WindowIndicator::new(2, false),
+        Dots {
+            count: 2,
+            overflow: false
+        }
+    );
+    assert_eq!(
+        WindowIndicator::new(3, false),
+        Dots {
+            count: 3,
+            overflow: false
+        }
+    );
+    assert_eq!(
+        WindowIndicator::new(4, false),
+        Dots {
+            count: 3,
+            overflow: true
+        }
+    );
+    assert_eq!(
+        WindowIndicator::new(usize::MAX, false),
+        Dots {
+            count: 3,
+            overflow: true
+        }
+    );
+}
 #[test]
 fn autohide_delays_and_cancelled_edge_reveal() {
     let mut d = AutoHide::new(true, 150, 700, 0);
