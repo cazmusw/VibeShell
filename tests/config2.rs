@@ -68,15 +68,17 @@ fn dock_hover_keeps_legacy_defaults_and_validates_tuning() {
     .unwrap();
     assert_eq!(old.dock.hover, DockHover::default());
     let tuned = patched(&old,
-        "dock.hover.zoom_percent=70\ndock.hover.radius_percent=175\ndock.hover.grow_ms=0\ndock.hover.shrink_ms=400\ndock.hover.easing='linear'\ndock.hover.cards_enabled=false"
+        "dock.hover.zoom_percent=70\ndock.hover.radius_percent=175\ndock.hover.background_percent=25\ndock.hover.grow_ms=0\ndock.hover.shrink_ms=400\ndock.hover.easing='linear'\ndock.hover.cards_enabled=false"
     ).unwrap();
     assert_eq!(tuned.dock.hover.zoom_percent, 70);
+    assert_eq!(tuned.dock.hover.background_percent, 25);
     assert_eq!(tuned.dock.hover.grow_ms, 0);
     assert!(!tuned.dock.hover.cards_enabled);
     assert_eq!(tuned.dock.hover.easing, HoverEasing::Linear);
     for invalid in [
         "dock.hover.zoom_percent=71",
         "dock.hover.radius_percent=24",
+        "dock.hover.background_percent=26",
         "dock.hover.shrink_ms=1001",
         "dock.hover.cards_show_delay_ms=2001",
         "dock.hover.easing='bounce'",

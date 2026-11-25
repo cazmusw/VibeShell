@@ -150,3 +150,54 @@ fn hover_strength_radius_and_easing_change_the_animation() {
     assert!(ease(HoverEasing::EaseOut, 0.5) > 0.5);
     assert_eq!(ease(HoverEasing::EaseInOut, 0.5), 0.5);
 }
+
+#[test]
+fn hover_follows_a_sweep_and_reverses_without_jumping() {
+    use mosaic_shell_tools::settings::{DockHover, HoverEasing};
+    let settings = DockHover {
+        easing: HoverEasing::Linear,
+        ..DockHover::default()
+    };
+    let mut motion = HoverMotion::default();
+    let entering = motion.frame(0, Some(0.), &settings);
+    assert!(entering.active);
+    assert_eq!(entering.amount, 0.);
+    let sweep = motion.frame(100_000, Some(120.), &settings);
+    assert_eq!(sweep.amount, 0.5);
+    assert!(sweep.axis.is_some_and(|axis| axis > 0. && axis < 120.));
+    let leave = motion.frame(100_000, None, &settings);
+    assert_eq!(leave.amount, sweep.amount);
+    assert_eq!(leave.axis, sweep.axis);
+    let shrinking = motion.frame(150_000, None, &settings);
+    assert_eq!(shrinking.amount, 0.375);
+    let reverse = motion.frame(150_000, Some(20.), &settings);
+    assert_eq!(reverse.amount, shrinking.amount);
+    assert_eq!(reverse.axis, shrinking.axis);
+
+    let mut settled = reverse;
+    for tick in 10..=60 {
+        settled = motion.frame(tick * 16_000, Some(20.), &settings);
+    }
+    assert_eq!(settled.amount, 1.);
+    assert_eq!(settled.axis, Some(20.));
+    assert!(!settled.active);
+    motion.reset();
+    assert!(!motion.frame(1_000_000, None, &settings).active);
+}
+
+#[test]
+fn zero_duration_applies_the_target_in_one_frame() {
+    use mosaic_shell_tools::settings::DockHover;
+    let settings = DockHover {
+        grow_ms: 0,
+        shrink_ms: 0,
+        ..DockHover::default()
+    };
+    let mut motion = HoverMotion::default();
+    for (time, cursor) in [(0, Some(20.)), (16_000, Some(60.)), (32_000, None)] {
+        let frame = motion.frame(time, cursor, &settings);
+        assert_eq!(frame.axis, cursor);
+        assert_eq!(frame.amount, if cursor.is_some() { 1. } else { 0. });
+        assert!(!frame.active);
+    }
+}

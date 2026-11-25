@@ -161,6 +161,7 @@ pub enum HoverEasing {
 pub struct DockHover {
     pub zoom_percent: u32,
     pub radius_percent: u32,
+    pub background_percent: u32,
     pub grow_ms: u32,
     pub shrink_ms: u32,
     pub easing: HoverEasing,
@@ -174,6 +175,7 @@ impl Default for DockHover {
         Self {
             zoom_percent: 45,
             radius_percent: 65,
+            background_percent: 12,
             grow_ms: 200,
             shrink_ms: 200,
             easing: HoverEasing::EaseOut,
@@ -229,6 +231,7 @@ fn validate(s: &Settings) -> io::Result<()> {
     let hover = &s.dock.hover;
     if hover.zoom_percent > 70
         || !(25..=200).contains(&hover.radius_percent)
+        || hover.background_percent > 25
         || hover.grow_ms > 1_000
         || hover.shrink_ms > 1_000
         || hover.cards_show_delay_ms > 2_000

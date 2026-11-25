@@ -1,5 +1,5 @@
 use crate::{
-    dock_model::{self, AutoHide, Event},
+    dock_model::{self, AutoHide, Event, HoverFrame, HoverMotion},
     settings::{self, DockEdge},
     trash::TrashState,
     zoom_icon::ZoomIcon,
@@ -41,10 +41,6 @@ struct Button {
     indicator: gtk::Label,
     content: gtk::Box,
     pinned: Cell<bool>,
-    from: Cell<f64>,
-    target: Cell<f64>,
-    start: Cell<i64>,
-    duration_ms: Cell<u32>,
 }
 impl Button {
     fn set_edge(&self, edge: DockEdge) {
@@ -77,7 +73,7 @@ struct Inner {
     background: gtk::Box,
     spacer: gtk::Box,
     edge_paint: gtk::DrawingArea,
-    body: gtk::Box,
+    body: ZoomIcon,
     items: gtk::Box,
     divider: gtk::Separator,
     scroll: gtk::ScrolledWindow,
@@ -96,6 +92,7 @@ struct Inner {
     tick: RefCell<Option<gtk::TickCallbackId>>,
     settle: Cell<u32>,
     pointer: Cell<Option<f64>>,
+    hover: RefCell<HoverMotion>,
     frames: Cell<u64>,
     layout_revision: Cell<u64>,
     actual_size: Cell<u32>,
@@ -146,18 +143,19 @@ impl Dock {
         let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
         spacer.set_vexpand(true);
         background.append(&spacer);
-        let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        body.add_css_class("dock-surface");
-        body.set_height_request(88);
-        body.set_margin_start(16);
-        body.set_margin_end(16);
-        body.set_can_target(false);
+        let surface = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        surface.add_css_class("dock-surface");
+        surface.set_can_target(false);
         // React to the GTK allocation, which can arrive after the Wayland resize.
         let allocation = gtk::DrawingArea::new();
         allocation.set_hexpand(true);
         allocation.set_vexpand(true);
         allocation.set_can_target(false);
-        body.append(&allocation);
+        surface.append(&allocation);
+        let body = ZoomIcon::backdrop(&surface);
+        body.set_height_request(88);
+        body.set_margin_start(16);
+        body.set_margin_end(16);
         background.append(&body);
         root.set_child(Some(&background));
         let items = gtk::Box::new(gtk::Orientation::Horizontal, 4);
@@ -209,6 +207,7 @@ impl Dock {
             tick: RefCell::new(None),
             settle: Cell::new(0),
             pointer: Cell::new(None),
+            hover: RefCell::default(),
             frames: Cell::new(0),
             layout_revision: Cell::new(0),
             actual_size: Cell::new(48),
@@ -220,21 +219,23 @@ impl Dock {
             if let Some(i) = weak.upgrade() {
                 i.event(Event::Enter);
                 i.pointer.set(Some(i.along_axis(x, y)));
-                i.targets();
+                i.schedule_hover();
             }
         });
         let weak = Rc::downgrade(&inner);
         motion.connect_motion(move |_, x, y| {
             if let Some(i) = weak.upgrade() {
-                i.pointer.set(Some(i.along_axis(x, y)));
-                i.targets();
+                let axis = Some(i.along_axis(x, y));
+                if i.pointer.replace(axis) != axis {
+                    i.schedule_hover();
+                }
             }
         });
         let weak = Rc::downgrade(&inner);
         motion.connect_leave(move |_| {
             if let Some(i) = weak.upgrade() {
                 i.pointer.set(None);
-                i.targets();
+                i.schedule_hover();
                 i.event(Event::Leave);
             }
         });
@@ -279,14 +280,12 @@ impl Dock {
         let weak = Rc::downgrade(&inner);
         inner.scroll.hadjustment().connect_value_changed(move |_| {
             if let Some(i) = weak.upgrade() {
-                i.targets();
                 i.kick();
             }
         });
         let weak = Rc::downgrade(&inner);
         inner.scroll.vadjustment().connect_value_changed(move |_| {
             if let Some(i) = weak.upgrade() {
-                i.targets();
                 i.kick();
             }
         });
@@ -294,6 +293,13 @@ impl Dock {
         inner.root.connect_map(move |_| {
             if let Some(i) = weak.upgrade() {
                 i.kick();
+            }
+        });
+        let weak = Rc::downgrade(&inner);
+        inner.root.connect_unmap(move |_| {
+            if let Some(i) = weak.upgrade() {
+                i.pointer.set(None);
+                i.reset_hover();
             }
         });
         let weak = Rc::downgrade(&inner);
@@ -363,7 +369,7 @@ impl Dock {
                 .set((geometry.width(), geometry.height()));
             self.0.resize();
         }
-        self.0.targets();
+        self.0.schedule_hover();
         self.0.sync();
     }
     pub fn configure(&self, config: &settings::Dock, reduced: bool, editable: bool) {
@@ -402,7 +408,7 @@ impl Dock {
         );
         self.0.resize();
         self.0.sync();
-        self.0.targets();
+        self.0.schedule_hover();
     }
     pub fn fullscreen(&self, value: bool) {
         if self.0.model.borrow().fullscreen != value {
@@ -622,6 +628,7 @@ impl Inner {
         self.divider
             .set_size_request(if side { 32 } else { 1 }, if side { 1 } else { 32 });
         self.background.set_orientation(cross);
+        self.body.set_edge(edge);
         let direction = if side {
             gtk::TextDirection::Ltr
         } else {
@@ -832,10 +839,6 @@ impl Inner {
                     indicator,
                     content: col,
                     pinned: Cell::new(item.pinned),
-                    from: Cell::new(1.),
-                    target: Cell::new(1.),
-                    start: Cell::new(0),
-                    duration_ms: Cell::new(0),
                 };
                 button.set_edge(self.config.borrow().edge);
                 self.buttons.borrow_mut().push(button);
@@ -872,9 +875,6 @@ impl Inner {
             } else {
                 " "
             });
-        }
-        if !same {
-            self.targets();
         }
     }
     fn install_pin_drop(self: &Rc<Self>) {
@@ -967,6 +967,12 @@ impl Inner {
         self.body.set_margin_top(if side { x } else { 0 });
         self.body.set_margin_bottom(if side { x } else { 0 });
         let thickness = size as i32 + 40;
+        let backdrop_percent = self.config.borrow().hover.background_percent;
+        let backdrop_room = (thickness * backdrop_percent as i32 + 99) / 100;
+        self.spacer.set_size_request(
+            if side { backdrop_room } else { -1 },
+            if side { -1 } else { backdrop_room },
+        );
         self.body.set_size_request(
             if side { thickness } else { -1 },
             if side { -1 } else { thickness },
@@ -995,58 +1001,55 @@ impl Inner {
         }
         self.kick();
     }
-    fn targets(self: &Rc<Self>) {
-        let now = glib::monotonic_time();
-        let config = self.config.borrow();
-        let enabled = config.magnification;
-        let side = config.edge.vertical();
-        let reduced = self.reduced.get();
-        let mut changed = false;
+    fn reset_hover(&self) {
+        self.hover.borrow_mut().reset();
+        self.body.set_scale(1.);
         for b in self.buttons.borrow().iter() {
-            let target = self
-                .pointer
-                .get()
-                .and_then(|x| {
-                    b.icon.compute_bounds(&self.root).map(|r| {
-                        dock_model::zoom_with(
-                            x - f64::from(if side {
-                                r.y() + r.height() / 2.
-                            } else {
-                                r.x() + r.width() / 2.
-                            }),
-                            f64::from(self.actual_size.get()),
-                            enabled,
-                            reduced,
-                            &config.hover,
-                        )
-                    })
+            b.icon.set_scale(1.);
+        }
+    }
+    fn hover_enabled(&self) -> bool {
+        let config = self.config.borrow();
+        !self.reduced.get()
+            && config.magnification
+            && (config.hover.zoom_percent > 0 || config.hover.background_percent > 0)
+    }
+    fn schedule_hover(self: &Rc<Self>) {
+        if self.hover_enabled() {
+            self.ensure_tick();
+        } else {
+            self.reset_hover();
+        }
+    }
+    fn paint_hover(&self, frame: HoverFrame, hover: &settings::DockHover) {
+        self.body
+            .set_scale(1. + frame.amount * f64::from(hover.background_percent) / 100.);
+        for b in self.buttons.borrow().iter() {
+            let target = frame
+                .axis
+                .and_then(|axis| {
+                    let rect = b.icon.compute_bounds(&self.root)?;
+                    let center = self.along_axis(
+                        f64::from(rect.x() + rect.width() / 2.),
+                        f64::from(rect.y() + rect.height() / 2.),
+                    );
+                    Some(dock_model::zoom_with(
+                        axis - center,
+                        f64::from(self.actual_size.get()),
+                        true,
+                        false,
+                        hover,
+                    ))
                 })
                 .unwrap_or(1.);
-            if (target - b.target.get()).abs() > 0.0001 {
-                changed = true;
-                let from = b.icon.scale();
-                b.from.set(from);
-                b.target.set(target);
-                b.start.set(now);
-                b.duration_ms.set(if target > from {
-                    config.hover.grow_ms
-                } else {
-                    config.hover.shrink_ms
-                });
-            }
-            if reduced || !enabled {
-                changed |= (b.icon.scale() - 1.).abs() > 0.0001;
-                b.icon.set_scale(1.);
-                b.from.set(1.);
-                b.target.set(1.);
-            }
-        }
-        if changed {
-            self.kick();
+            b.icon.set_scale(1. + (target - 1.) * frame.amount);
         }
     }
     fn kick(self: &Rc<Self>) {
         self.settle.set(2);
+        self.ensure_tick();
+    }
+    fn ensure_tick(self: &Rc<Self>) {
         if self.tick.borrow().is_some() {
             return;
         }
@@ -1056,23 +1059,24 @@ impl Inner {
                 return glib::ControlFlow::Break;
             };
             i.frames.set(i.frames.get() + 1);
-            let mut active = false;
-            let easing = i.config.borrow().hover.easing;
-            for b in i.buttons.borrow().iter() {
-                let duration = f64::from(b.duration_ms.get()) * 1000.;
-                let progress = if duration == 0. {
-                    1.
-                } else {
-                    ((clock.frame_time() - b.start.get()) as f64 / duration).clamp(0., 1.)
-                };
-                let value = b.from.get()
-                    + (b.target.get() - b.from.get()) * dock_model::ease(easing, progress);
-                b.icon.set_scale(value);
-                active |= progress < 1. && (b.target.get() - b.from.get()).abs() > 0.0001;
-            }
-            i.input_region();
+            let active = if i.hover_enabled() {
+                let config = i.config.borrow();
+                let frame =
+                    i.hover
+                        .borrow_mut()
+                        .frame(clock.frame_time(), i.pointer.get(), &config.hover);
+                let active = frame.active;
+                // Only the painted transform changes. Widgets keep their allocation.
+                i.paint_hover(frame, &config.hover);
+                active
+            } else {
+                false
+            };
             let settle = i.settle.get();
-            i.settle.set(settle.saturating_sub(1));
+            if settle > 0 {
+                i.input_region();
+                i.settle.set(settle - 1);
+            }
             if !active && settle == 0 {
                 i.tick.borrow_mut().take();
                 glib::ControlFlow::Break
@@ -1127,7 +1131,7 @@ impl Inner {
             ));
         }
         for b in self.buttons.borrow().iter() {
-            if let Some(r) = b.icon.painted_bounds(&self.window) {
+            if let Some(r) = b.icon.compute_bounds(&self.window) {
                 let left = r.x().floor().max(0.) as i32;
                 let top = r.y().floor().max(0.) as i32;
                 let right = (r.x() + r.width()).ceil().min(self.window.width() as f32) as i32;

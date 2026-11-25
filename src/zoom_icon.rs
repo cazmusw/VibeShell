@@ -17,6 +17,7 @@ mod imp {
         pub size: Cell<i32>,
         pub scale: Cell<f64>,
         pub edge: Cell<DockEdge>,
+        pub backdrop: Cell<bool>,
     }
     #[glib::object_subclass]
     impl ObjectSubclass for ZoomIcon {
@@ -41,6 +42,13 @@ mod imp {
     }
     impl WidgetImpl for ZoomIcon {
         fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            if self.backdrop.get() {
+                return self
+                    .child
+                    .borrow()
+                    .as_ref()
+                    .map_or((0, 0, -1, -1), |child| child.measure(orientation, for_size));
+            }
             if let Some(child) = self.child.borrow().as_ref() {
                 child.measure(orientation, for_size);
             }
@@ -62,7 +70,8 @@ mod imp {
                 );
                 snapshot.save();
                 snapshot.translate(&gtk::graphene::Point::new(x, y));
-                snapshot.scale(self.scale.get() as f32, self.scale.get() as f32);
+                let (sx, sy) = object.axes();
+                snapshot.scale(sx, sy);
                 snapshot.translate(&gtk::graphene::Point::new(-x, -y));
                 object.snapshot_child(child, snapshot);
                 snapshot.restore();
@@ -73,11 +82,31 @@ mod imp {
 glib::wrapper! {pub struct ZoomIcon(ObjectSubclass<imp::ZoomIcon>) @extends gtk::Widget,@implements gtk::Accessible,gtk::Buildable,gtk::ConstraintTarget;}
 impl ZoomIcon {
     pub fn new(child: &gtk::Widget, size: i32) -> Self {
-        let icon: Self = glib::Object::builder().build();
-        child.set_parent(&icon);
-        *icon.imp().child.borrow_mut() = Some(child.clone());
+        let icon = Self::wrap(child);
         icon.set_size(size);
         icon
+    }
+    pub fn backdrop(child: &impl IsA<gtk::Widget>) -> Self {
+        let surface = Self::wrap(child.as_ref());
+        surface.imp().backdrop.set(true);
+        surface.set_can_target(false);
+        surface
+    }
+    fn wrap(child: &gtk::Widget) -> Self {
+        let widget: Self = glib::Object::builder().build();
+        child.set_parent(&widget);
+        *widget.imp().child.borrow_mut() = Some(child.clone());
+        widget
+    }
+    fn axes(&self) -> (f32, f32) {
+        let scale = self.scale() as f32;
+        if !self.imp().backdrop.get() {
+            (scale, scale)
+        } else if self.imp().edge.get().vertical() {
+            (scale, 1.)
+        } else {
+            (1., scale)
+        }
     }
     pub fn set_size(&self, size: i32) {
         if self.imp().size.replace(size) != size {
@@ -102,16 +131,16 @@ impl ZoomIcon {
     pub fn painted_bounds(&self, target: &impl IsA<gtk::Widget>) -> Option<gtk::graphene::Rect> {
         let rect = self.compute_bounds(target)?;
         let (x, y) = anchor(self.imp().edge.get(), rect.width(), rect.height());
-        let scale = self.scale() as f32;
+        let (sx, sy) = self.axes();
         Some(gtk::graphene::Rect::new(
-            rect.x() + x * (1. - scale),
-            rect.y() + y * (1. - scale),
-            rect.width() * scale,
-            rect.height() * scale,
+            rect.x() + x * (1. - sx),
+            rect.y() + y * (1. - sy),
+            rect.width() * sx,
+            rect.height() * sy,
         ))
     }
     pub fn set_scale(&self, scale: f64) {
-        let scale = scale.clamp(1., 1.45);
+        let scale = scale.clamp(1., 1.7);
         if (self.imp().scale.replace(scale) - scale).abs() > 0.0001 {
             self.queue_draw();
         }

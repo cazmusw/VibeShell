@@ -243,7 +243,7 @@ struct Preferences {
     all_outputs: gtk::Switch,
     auto_hide: gtk::Switch,
     magnification: gtk::Switch,
-    hover_values: [gtk::SpinButton; 6],
+    hover_values: [gtk::SpinButton; HOVER_VALUES.len()],
     hover_easing: gtk::DropDown,
     hover_cards: gtk::Switch,
     minimize: gtk::Switch,
@@ -254,7 +254,7 @@ struct Preferences {
     error: gtk::Label,
 }
 
-const HOVER_VALUES: [(&str, &str, f64, f64, f64); 6] = [
+const HOVER_VALUES: [(&str, &str, f64, f64, f64); 7] = [
     (
         "Увеличение значков, %",
         "dock.hover.zoom_percent",
@@ -268,6 +268,13 @@ const HOVER_VALUES: [(&str, &str, f64, f64, f64); 6] = [
         25.,
         200.,
         5.,
+    ),
+    (
+        "Расширение фона, %",
+        "dock.hover.background_percent",
+        0.,
+        25.,
+        1.,
     ),
     (
         "Длительность увеличения, мс",
@@ -1179,6 +1186,7 @@ impl View {
         for (spin, value) in p.hover_values.iter().zip([
             hover.zoom_percent,
             hover.radius_percent,
+            hover.background_percent,
             hover.grow_ms,
             hover.shrink_ms,
             hover.cards_show_delay_ms,

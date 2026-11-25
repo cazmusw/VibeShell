@@ -61,6 +61,16 @@ def run(args, env, children, logs, ctl, wait, fixture, windows, config_file):
     def button(code,down):input(f'button {code} {int(down)}')
     def first():
         s=state();return (width-s['width'])/2+52,height-12-s['height']+55
+    def backdrop_top(dock):
+        top = height - 12 - dock['height']
+        pixel_count = min(50, dock['height'])
+        shot = subprocess.check_output(
+            [args.grim, '-t', 'ppm', '-s', '1', '-g',
+             f'{width // 2},{top} 1x{pixel_count}', '-'], env=env, timeout=5)
+        magic, size, maximum, pixels = shot.split(b'\n', 3)
+        assert (magic, size, maximum) == (b'P6', f'1 {pixel_count}'.encode(), b'255')
+        return next(row for row in range(pixel_count)
+                    if pixels[3 * row:3 * row + 3] == bytes.fromhex('222936'))
     try:
         time.sleep(.25)
         x,y=first();move(x,y)
@@ -77,6 +87,26 @@ def run(args, env, children, logs, ctl, wait, fixture, windows, config_file):
         x,y=first();move(x,y)
         wait(lambda: 1.1 < state()['max_scale'] <= 1.20001)
         move(20,300);wait(lambda: abs(state()['max_scale']-1)<.00001)
+        patch("dock.hover.zoom_percent=70\ndock.hover.background_percent=25")
+        wait(lambda: not state()['animation_active'])
+        baseline = state()
+        if args.grim:
+            base_top = backdrop_top(baseline)
+        x,y=first();move(x,y)
+        wait(lambda: state()['max_scale'] > 1.60)
+        enlarged = state()
+        for key in ('width', 'height', 'exclusive_zone', 'layout_revision'):
+            assert enlarged[key] == baseline[key]
+        if args.grim:
+            assert backdrop_top(enlarged) < base_top
+        patch('general.reduced_motion=true')
+        wait(lambda: not state()['animation_active'])
+        assert state()['max_scale'] == 1.
+        if args.grim:
+            assert backdrop_top(state()) == base_top
+        move(20,300)
+        patch('general.reduced_motion=false\ndock.hover.background_percent=12')
+        result['background_zoom_keeps_geometry_and_respects_reduced_motion']=True
         patch("dock.hover.zoom_percent=45\ndock.hover.radius_percent=65\ndock.hover.grow_ms=200\ndock.hover.shrink_ms=200\ndock.hover.easing='ease_out'")
         time.sleep(.2)
         x,y=first();move(x,y)

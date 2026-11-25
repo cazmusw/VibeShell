@@ -179,6 +179,96 @@ pub fn ease(curve: crate::settings::HoverEasing, progress: f64) -> f64 {
     }
 }
 
+#[derive(Default)]
+pub struct HoverMotion {
+    axis: Option<f64>,
+    last_frame: Option<i64>,
+    inside: bool,
+    amount: f64,
+    transition: Option<HoverTransition>,
+}
+
+struct HoverTransition {
+    start: i64,
+    duration: i64,
+    from: f64,
+    easing: crate::settings::HoverEasing,
+}
+
+pub struct HoverFrame {
+    pub axis: Option<f64>,
+    pub amount: f64,
+    pub active: bool,
+}
+
+impl HoverMotion {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn frame(
+        &mut self,
+        time: i64,
+        cursor: Option<f64>,
+        hover: &crate::settings::DockHover,
+    ) -> HoverFrame {
+        // Cursor motion and the enter/leave tween are independent. Moving along
+        // the Dock cannot restart the tween, even if motion arrives every frame.
+        if let Some(transition) = &self.transition {
+            let progress = (time - transition.start) as f64 / transition.duration as f64;
+            let target = f64::from(u8::from(self.inside));
+            self.amount =
+                transition.from + (target - transition.from) * ease(transition.easing, progress);
+            if progress >= 1. {
+                self.transition = None;
+            }
+        }
+        if self.inside != cursor.is_some() {
+            self.inside = cursor.is_some();
+            let duration = if self.inside {
+                hover.grow_ms
+            } else {
+                hover.shrink_ms
+            };
+            let target = f64::from(u8::from(self.inside));
+            self.transition = (duration > 0 && self.amount != target).then_some(HoverTransition {
+                start: time,
+                duration: i64::from(duration) * 1000,
+                from: self.amount,
+                easing: hover.easing,
+            });
+            if self.transition.is_none() {
+                self.amount = target;
+            }
+        }
+
+        let elapsed = self
+            .last_frame
+            .replace(time)
+            .map_or(0, |last| (time - last).clamp(0, 33_333));
+        let mut following = false;
+        if let Some(cursor) = cursor {
+            let axis = self.axis.unwrap_or(cursor);
+            let remaining = cursor - axis;
+            self.axis = Some(if hover.grow_ms == 0 || remaining.abs() <= 0.15 {
+                cursor
+            } else {
+                // Exponential tracking has the same response at different refresh rates.
+                let response_us = f64::from((hover.grow_ms / 5).clamp(12, 80)) * 1000.;
+                following = true;
+                axis - remaining * (-(elapsed as f64) / response_us).exp_m1()
+            });
+        } else if self.transition.is_none() {
+            self.axis = None;
+        }
+        HoverFrame {
+            axis: self.axis,
+            amount: self.amount,
+            active: self.transition.is_some() || following,
+        }
+    }
+}
+
 pub fn divider_index(pinned: impl IntoIterator<Item = bool>) -> Option<usize> {
     pinned
         .into_iter()
