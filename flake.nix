@@ -340,6 +340,7 @@
             --randr ${pkgs.wlr-randr}/bin/wlr-randr \
             --scale ${ { "100" = "1"; "125" = "1.25"; "150" = "1.5"; "200" = "2"; }.${scale}} \
             --dock-behavior --grim ${pkgs.grim}/bin/grim \
+            ${lib.optionalString (scale == "100") "--swaybg ${pkgs.swaybg}/bin/swaybg"} \
             --screenshot $out/preview-dark.png --report $out/vertical.json
         '');
       temperaturesCheck = pkgs.runCommand "mosaic-temperatures" {

@@ -7,6 +7,80 @@ import time
 import tomllib
 
 
+def check_transparency(args, env, ctl, wait):
+    output = tomllib.loads(ctl('outputs').stdout)['outputs'][0]
+    width, height = output['width'], output['height']
+
+    def state():
+        return tomllib.loads(ctl('dock', 'state').stdout)
+
+    def patch(text):
+        ctl('config', 'set', text)
+
+    def capture(x, y, w, h):
+        shot = subprocess.check_output(
+            [args.grim, '-t', 'ppm', '-s', '1', '-g', f'{x},{y} {w}x{h}', '-'],
+            env=env, timeout=5)
+        magic, size, maximum, pixels = shot.split(b'\n', 3)
+        assert (magic, size, maximum) == (b'P6', f'{w} {h}'.encode(), b'255')
+        return pixels
+
+    panel_fill = (width // 2, 8, 1, 1)
+    dock_fill = (width // 2, height - 90, 1, 1)
+    backdrop = (width // 2, 400, 1, 1)
+
+    def check_half_transparent(region, opaque, wall):
+        tint = wait(lambda: pixel if (pixel := capture(*region)) not in (wall, opaque) else None)
+        assert all(min(a, b) <= c <= max(a, b) for a, b, c in zip(wall, opaque, tint))
+
+    for theme, foreground, panel_color, dock_color in (
+        ('dark', 'f3f5fa', '171b24', '222936'),
+        ('light', '172438', 'f0f3f8', 'e9eef7'),
+    ):
+        wall = bytes.fromhex(foreground)
+        wallpaper = subprocess.Popen([args.swaybg, '-c', f'#{foreground}'], env=env)
+        try:
+            wait(lambda: capture(*backdrop) == wall)
+            patch(f"theme.mode='{theme}'\npanel.transparency_percent=0\ndock.transparency_percent=0")
+            expected = bytes.fromhex(panel_color), bytes.fromhex(dock_color)
+            wait(lambda: (capture(*panel_fill), capture(*dock_fill)) == expected)
+            baseline = state()
+            patch('panel.transparency_percent=50')
+            check_half_transparent(panel_fill, expected[0], wall)
+            assert capture(*dock_fill) == expected[1]
+            patch('panel.transparency_percent=100')
+            wait(lambda: capture(*panel_fill) == wall)
+            assert capture(*dock_fill) == expected[1]
+            # The wallpaper matches the nominal menu text color. The contrasting
+            # outline must still provide visible edges around the glyphs.
+            panel_text = capture(12, 9, 67, 17)
+            assert any(abs(value - wall[channel % 3]) > 55
+                       for channel, value in enumerate(panel_text))
+            patch('dock.transparency_percent=50')
+            check_half_transparent(dock_fill, expected[1], wall)
+            assert capture(*panel_fill) == wall
+            patch('dock.transparency_percent=100')
+            wait(lambda: capture(*dock_fill) == wall)
+            assert capture(*panel_fill) == wall
+            dock_right = (width + baseline['width']) // 2
+            launcher_icon = capture(dock_right - 58, height - 75, 32, 35)
+            assert any(abs(value - wall[channel % 3]) > 55
+                       for channel, value in enumerate(launcher_icon))
+            for key in ('width', 'height', 'exclusive_zone', 'layout_revision'):
+                assert state()[key] == baseline[key]
+            assert tomllib.loads(ctl('config', 'get').stdout)['dock']['transparency_percent'] == 100
+            preview = Path(args.report).parent / f'preview-transparency-{theme}.png'
+            subprocess.run([args.grim, '-o', 'HEADLESS-1', str(preview)], env=env, check=True, timeout=5)
+        finally:
+            wallpaper.terminate()
+            wallpaper.wait(timeout=3)
+    patch("theme.mode='dark'\npanel.transparency_percent=0\ndock.transparency_percent=0")
+    result = {'passed': True, 'independent_background_transparency': True,
+              'foreground_contrast_in_both_themes': True}
+    (Path(args.report).parent / 'surface-transparency.json').write_text(json.dumps(result) + '\n')
+    print(json.dumps(result), flush=True)
+
+
 def run(args, env, children, logs, ctl, wait, fixture, windows, config_file):
     def config():return tomllib.loads(ctl('config','get').stdout)
     def state():return tomllib.loads(ctl('dock','state').stdout)

@@ -61,6 +61,32 @@ fn typed_patch_keeps_other_fields_and_validates_ranges() {
 }
 
 #[test]
+fn surface_transparency_defaults_and_persists_independently() {
+    let old =
+        toml::from_str::<Settings>("schema_version=2\nrevision=0\npins=[]\n[panel]\n[dock]\n")
+            .unwrap();
+    let panel = patched(&old, "panel.transparency_percent=35").unwrap();
+    assert_eq!(panel.panel.transparency_percent, 35);
+    assert_eq!(panel.dock.transparency_percent, 0);
+    let dock = patched(&panel, "dock.transparency_percent=100").unwrap();
+    assert_eq!(dock.panel.transparency_percent, 35);
+    assert_eq!(dock.dock.transparency_percent, 100);
+    let d = dir();
+    let path = d.join("config.toml");
+    let saved = save(&path, &dock).unwrap();
+    assert_eq!(load(&path).unwrap(), saved);
+    fs::remove_dir_all(d).unwrap();
+    for invalid in [
+        "panel.transparency_percent=-1",
+        "panel.transparency_percent=101",
+        "dock.transparency_percent=-1",
+        "dock.transparency_percent=101",
+    ] {
+        assert!(patched(&dock, invalid).is_err(), "{invalid}");
+    }
+}
+
+#[test]
 fn dock_hover_keeps_legacy_defaults_and_validates_tuning() {
     let old = toml::from_str::<Settings>(
         "schema_version=2\nrevision=2\npins=[]\n[dock]\nmagnification=true",

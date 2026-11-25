@@ -65,6 +65,7 @@ impl PanelItem {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
 pub struct Panel {
+    pub transparency_percent: u32,
     pub order: Vec<PanelItem>,
     pub hidden: Vec<PanelItem>,
 }
@@ -78,6 +79,7 @@ impl Panel {
 impl Default for Panel {
     fn default() -> Self {
         Self {
+            transparency_percent: 0,
             order: PanelItem::BUILT_IN.to_vec(),
             hidden: Vec::new(),
         }
@@ -117,6 +119,7 @@ impl DockEdge {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
 pub struct Dock {
+    pub transparency_percent: u32,
     pub edge: DockEdge,
     pub icon_size: u32,
     pub preferred_output: String,
@@ -132,6 +135,7 @@ pub struct Dock {
 impl Default for Dock {
     fn default() -> Self {
         Self {
+            transparency_percent: 0,
             edge: DockEdge::Bottom,
             icon_size: 48,
             preferred_output: String::new(),
@@ -221,6 +225,11 @@ fn validate(s: &Settings) -> io::Result<()> {
     if s.dock.preferred_output.len() > 256 || s.dock.preferred_output.chars().any(char::is_control)
     {
         return Err(io::Error::other("invalid preferred output"));
+    }
+    if s.panel.transparency_percent > 100 || s.dock.transparency_percent > 100 {
+        return Err(io::Error::other(
+            "background transparency must be between 0 and 100",
+        ));
     }
     if !(32..=80).contains(&s.dock.icon_size)
         || s.dock.show_delay_ms > 2000

@@ -13,6 +13,7 @@ p=argparse.ArgumentParser()
 for name in ['labwc','shell','services','ctl','probe','report']:p.add_argument('--'+name,required=True)
 p.add_argument('--inside',action='store_true')
 p.add_argument('--grim')
+p.add_argument('--swaybg')
 p.add_argument('--screenshot')
 p.add_argument('--session')
 p.add_argument('--interrupt-session',action='store_true')
@@ -264,6 +265,9 @@ with tempfile.TemporaryDirectory(prefix='mosaic-vertical-') as directory:
             run(a,env,children,ctl,wait,root,uri_marker)
         ctl('window','close',epoch,ident);wait(lambda:not fixture())
         assert ctl('window','activate',epoch,ident,ok=False).returncode!=0
+        if a.swaybg:
+            from dock_behavior import check_transparency
+            check_transparency(a,env,ctl,wait)
         if a.live_cards:
             from live_cards import run
             run(a,env,root,children,logs,ctl,wait,windows)

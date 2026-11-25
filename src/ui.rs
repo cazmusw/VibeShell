@@ -31,6 +31,8 @@ struct AppEntry {
 }
 struct View {
     app: gtk::Application,
+    transparency_css: gtk::CssProvider,
+    transparency: Cell<(u32, u32)>,
     trash: Rc<crate::trash::Trash>,
     tray: Rc<crate::tray_ui::Tray>,
     panels: RefCell<Vec<crate::panel::Panel>>,
@@ -250,6 +252,8 @@ struct Preferences {
     size: gtk::SpinButton,
     show_delay: gtk::SpinButton,
     hide_delay: gtk::SpinButton,
+    panel_transparency: gtk::SpinButton,
+    dock_transparency: gtk::SpinButton,
     panel: LayoutEditor,
     error: gtk::Label,
 }
@@ -1135,6 +1139,7 @@ impl View {
     }
     fn reconfigure(self: &Rc<Self>) {
         let s = self.settings.borrow().clone();
+        self.sync_transparency(&s);
         let reduced = self.reduced_motion();
         for dock in self.docks() {
             if s.dock.edge != dock.dock.edge() {
@@ -1153,6 +1158,29 @@ impl View {
         }
         self.sync_outputs();
         self.sync_preferences();
+    }
+    fn sync_transparency(&self, settings: &Settings) {
+        let values = (
+            settings.panel.transparency_percent,
+            settings.dock.transparency_percent,
+        );
+        if self.transparency.replace(values) == values {
+            return;
+        }
+        let mut css = String::new();
+        for (name, transparency) in [("panel", values.0), ("dock", values.1)] {
+            if transparency == 0 {
+                continue;
+            }
+            let coverage = 100 - transparency;
+            let contrast = format!("var(--mosaic-{name}-contrast)");
+            css.push_str(&format!(
+                "window.mosaic-{name} {{ --mosaic-{name}-coverage: {coverage}%; \
+                 --mosaic-{name}-shadow: 0 1px 1px {contrast}, 0 -1px 1px {contrast}, \
+                 1px 0 1px {contrast}, -1px 0 1px {contrast}; }}\n"
+            ));
+        }
+        self.transparency_css.load_from_string(&css);
     }
     fn sync_preferences(&self) {
         let s = self.settings.borrow();
@@ -1204,6 +1232,10 @@ impl View {
         p.size.set_value(f64::from(s.dock.icon_size));
         p.show_delay.set_value(s.dock.show_delay_ms as f64);
         p.hide_delay.set_value(s.dock.hide_delay_ms as f64);
+        p.panel_transparency
+            .set_value(f64::from(s.panel.transparency_percent));
+        p.dock_transparency
+            .set_value(f64::from(s.dock.transparency_percent));
         p.panel.sync(&s.panel);
     }
     fn edit_panel(self: &Rc<Self>, edit: LayoutEdit) {
@@ -1237,7 +1269,11 @@ impl View {
                     panel.hidden.push(item);
                 }
             }
-            LayoutEdit::Reset => panel = settings::Panel::default(),
+            LayoutEdit::Reset => {
+                let defaults = settings::Panel::default();
+                panel.order = defaults.order;
+                panel.hidden = defaults.hidden;
+            }
         }
         self.change(&format!("[panel]\n{}", toml::to_string(&panel).unwrap()));
     }
@@ -2821,6 +2857,11 @@ impl View {
 
         let controls = gtk::Box::new(gtk::Orientation::Vertical, 14);
         controls.set_sensitive(!managed);
+        let dock_transparency = gtk::SpinButton::with_range(0., 100., 1.);
+        controls.append(&Self::settings_row(
+            "Прозрачность фона, %",
+            &dock_transparency,
+        ));
         let dock_edge = gtk::DropDown::from_strings(&["Снизу", "Слева", "Справа"]);
         controls.append(&Self::settings_row("Положение Dock", &dock_edge));
         let preferred = gtk::Entry::new();
@@ -2912,10 +2953,17 @@ impl View {
         info.set_wrap(true);
         info.set_xalign(0.);
         controls.append(&info);
-        panel.widget().set_sensitive(!managed);
+        let panel_controls = gtk::Box::new(gtk::Orientation::Vertical, 14);
+        panel_controls.set_sensitive(!managed);
+        let panel_transparency = gtk::SpinButton::with_range(0., 100., 1.);
+        panel_controls.append(&Self::settings_row(
+            "Прозрачность фона, %",
+            &panel_transparency,
+        ));
+        panel_controls.append(panel.widget());
         for (key, title, page) in [
             (PreferencesSection::Dock.name(), "Dock", &controls),
-            ("panel", "Панель", panel.widget()),
+            ("panel", "Панель", &panel_controls),
         ] {
             let scroll = gtk::ScrolledWindow::builder()
                 .hscrollbar_policy(gtk::PolicyType::Never)
@@ -2963,6 +3011,8 @@ impl View {
             (&size, "dock.icon_size"),
             (&show_delay, "dock.show_delay_ms"),
             (&hide_delay, "dock.hide_delay_ms"),
+            (&panel_transparency, "panel.transparency_percent"),
+            (&dock_transparency, "dock.transparency_percent"),
         ] {
             let weak = Rc::downgrade(self);
             widget.connect_value_changed(move |w| {
@@ -2996,6 +3046,8 @@ impl View {
             size,
             show_delay,
             hide_delay,
+            panel_transparency,
+            dock_transparency,
             panel,
             error,
         });
@@ -3013,6 +3065,7 @@ pub fn run(
     }
     let (tracker, events) = Tracker::new()?;
     let provider = gtk::CssProvider::new();
+    let transparency_css = gtk::CssProvider::new();
     provider.load_from_string(include_str!("../assets/style.css"));
     if let Some(display) = gdk::Display::default() {
         if let Some(icons) = option_env!("MOSAIC_GTK_ICON_DIR") {
@@ -3021,6 +3074,11 @@ pub fn run(
         gtk::style_context_add_provider_for_display(
             &display,
             &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &transparency_css,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
     }
@@ -3055,6 +3113,8 @@ pub fn run(
     apps.sort_by_key(|a| a.name.to_lowercase());
     let view = Rc::new_cyclic(|owner: &std::rc::Weak<View>| View {
         app: app.clone(),
+        transparency_css,
+        transparency: Cell::default(),
         trash: crate::trash::Trash::new({
             let owner = owner.clone();
             move |state| {

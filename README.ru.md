@@ -267,6 +267,10 @@ pins = ["firefox.desktop", "org.xfce.Thunar.desktop"]
 фона к центру экрана. `dock.hover.background_percent` принимает
 0..25, по умолчанию 12. Ноль отключает расширение фона.
 
+В разделах «Панель» и «Dock» регулируется прозрачность фона от 0 до 100%.
+Ноль сохраняет сплошную заливку. Параметры конфигурации —
+`panel.transparency_percent` и `dock.transparency_percent`.
+
 `reload` перечитывает файл явно, автоматического наблюдения пока нет.
 Невалидный reload сохраняет рабочую конфигурацию. D-Bus ApplyPatch и
 ReorderPin проверяют ожидаемую revision; CLI читает её перед изменением.
