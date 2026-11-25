@@ -4,7 +4,7 @@ use std::{
     rc::Rc,
 };
 
-pub(crate) const URI: &str = "trash:///";
+pub const URI: &str = "trash:///";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TrashState {
@@ -72,7 +72,7 @@ async fn empty(root: &gio::File) -> Result<(), glib::Error> {
 }
 
 type Changed = Box<dyn Fn(TrashState)>;
-pub(crate) struct Trash {
+pub struct Trash {
     root: gio::File,
     monitor: RefCell<Option<gio::FileMonitor>>,
     owner_watch: RefCell<Option<gio::WatcherId>>,
@@ -97,6 +97,10 @@ impl Trash {
         self.state.get()
     }
     pub fn start(self: &Rc<Self>) {
+        if self.owner_watch.borrow().is_some() {
+            self.refresh();
+            return;
+        }
         let appeared = Rc::downgrade(self);
         let vanished = Rc::downgrade(self);
         let watcher = gio::bus_watch_name(

@@ -24,6 +24,7 @@ p.add_argument('--control-center',action='store_true')
 p.add_argument('--launcher-check', action='store_true')
 p.add_argument('--alt-tab')
 p.add_argument('--files')
+p.add_argument('--files-trash')
 p.add_argument('--mime-data')
 p.add_argument('--pulseaudio')
 p.add_argument('--pactl')
@@ -265,6 +266,9 @@ with tempfile.TemporaryDirectory(prefix='mosaic-vertical-') as directory:
             run(a,env,children,ctl,wait,root,uri_marker)
         ctl('window','close',epoch,ident);wait(lambda:not fixture())
         assert ctl('window','activate',epoch,ident,ok=False).returncode!=0
+        if a.files_trash:
+            from trash_check import files_trash
+            files_trash(a,env,children,logs,ctl,wait,root,windows)
         if a.cards and a.grim:
             from cards import check_indicators
             check_indicators(a,env,ctl,wait,windows)

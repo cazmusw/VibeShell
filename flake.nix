@@ -311,7 +311,8 @@
           --session ${tools}/bin/mosaic-session --ctl ${tools}/bin/shellctl \
           --probe ${layerProbe}/bin/layer-smoke --pointer ${pointerFixture}/bin/mosaic-pointer-fixture \
           --wtype ${pkgs.wtype}/bin/wtype --gvfsd ${pkgs.gvfs}/libexec/gvfsd \
-          --gio ${pkgs.glib.bin}/bin/gio --confirm-trash-delete --report $out/vertical.json
+          --gio ${pkgs.glib.bin}/bin/gio --confirm-trash-delete \
+          --files-trash ${tools}/bin/mosaic-files --grim ${pkgs.grim}/bin/grim --report $out/vertical.json
       '';
       pointerFixture = pkgs.rustPlatform.buildRustPackage {
         pname = "mosaic-pointer-fixture";

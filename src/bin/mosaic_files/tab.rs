@@ -7,6 +7,7 @@ use crate::transfer::{self, Batch, Kind, TransferError};
 use crate::{Browser, admin, archives, folder_sizes, photos, properties, templates};
 use glib::translate::IntoGlib;
 use gtk::{gdk, gio, glib, pango, prelude::*};
+use mosaic_shell_tools::trash::TrashState;
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
@@ -71,6 +72,7 @@ pub enum Command {
     NewFolder,
     Rename,
     Trash,
+    EmptyTrash,
     Clip(Kind),
     Paste,
     Details,
@@ -92,6 +94,7 @@ pub struct Tab {
     forward: gtk::Button,
     up: gtk::Button,
     refresh: gtk::Button,
+    empty_trash: gtk::Button,
     create: gtk::Button,
     rename: gtk::Button,
     trash: gtk::Button,
@@ -131,12 +134,15 @@ impl Tab {
         let forward = icon_button("go-next-symbolic", "Вперёд (Alt+→)");
         let up = icon_button("go-up-symbolic", "На уровень выше (Alt+↑)");
         let refresh = icon_button("view-refresh-symbolic", "Обновить (F5)");
+        let empty_trash = gtk::Button::with_label("Очистить корзину");
+        empty_trash.set_visible(false);
         let address = AddressBar::new();
         toolbar.append(&back);
         toolbar.append(&forward);
         toolbar.append(&up);
         toolbar.append(&refresh);
         toolbar.append(&address.widget);
+        toolbar.append(&empty_trash);
         page.append(&toolbar);
 
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -221,6 +227,7 @@ impl Tab {
             forward,
             up,
             refresh,
+            empty_trash,
             create,
             rename,
             trash,
@@ -259,6 +266,7 @@ impl Tab {
             (&self.create, Command::NewFolder),
             (&self.rename, Command::Rename),
             (&self.trash, Command::Trash),
+            (&self.empty_trash, Command::EmptyTrash),
             (&self.cut, Command::Clip(Kind::Move)),
             (&self.copy, Command::Clip(Kind::Copy)),
             (&self.paste, Command::Paste),
@@ -902,6 +910,11 @@ impl Tab {
             browser.folder_sizes.cancel();
         }
         let file = gio::File::for_uri(&uri);
+        if file.has_uri_scheme("trash")
+            && let Some(browser) = self.browser.upgrade()
+        {
+            browser.trash.start();
+        }
         self.notice.set_visible(false);
         let tab = Rc::downgrade(self);
         let task = glib::spawn_future_local(async move {
@@ -1047,6 +1060,11 @@ impl Tab {
                 self.prompt_name(NamePrompt::Rename, self.directory())
             }
             Command::Trash if self.trash.is_sensitive() => self.confirm_trash(),
+            Command::EmptyTrash if self.empty_trash.is_sensitive() => {
+                if let Some(browser) = self.browser.upgrade() {
+                    browser.confirm_empty_trash();
+                }
+            }
             Command::Clip(kind) if self.copy.is_sensitive() => {
                 let files = self.selected_files();
                 if let Some(sources) = files
@@ -1072,7 +1090,7 @@ impl Tab {
         }
     }
 
-    fn update_controls(&self) {
+    pub(super) fn update_controls(&self) {
         let history = self.history.borrow();
         let can_navigate = !self.mutating.get();
         self.back
@@ -1084,6 +1102,17 @@ impl Tab {
             .set_sensitive(can_navigate && directory.parent().is_some());
         self.refresh.set_sensitive(can_navigate);
         self.address.widget.set_sensitive(can_navigate);
+        let trash_root = directory.has_uri_scheme("trash") && directory.parent().is_none();
+        self.empty_trash.set_visible(trash_root);
+        self.empty_trash.set_sensitive(
+            trash_root
+                && self.loaded.get()
+                && !self.loading()
+                && can_navigate
+                && self.browser.upgrade().is_some_and(|browser| {
+                    !browser.confirming_trash.get() && browser.trash.state() == TrashState::Full
+                }),
+        );
         let editable = self.loaded.get()
             && !self.loading()
             && can_navigate

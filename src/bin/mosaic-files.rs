@@ -27,9 +27,12 @@ mod transfer;
 
 use bookmarks::Bookmarks;
 use gtk::{gdk, gio, glib, graphene, prelude::*};
-use mosaic_shell_tools::diagnostics;
+use mosaic_shell_tools::{
+    diagnostics,
+    trash::{self, Trash, TrashState},
+};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     path::Path,
     rc::{Rc, Weak},
 };
@@ -123,6 +126,8 @@ struct Browser {
     archive_copies: archives::OpenCopies,
     tab_menu: RefCell<Option<gtk::Popover>>,
     folder_sizes: Rc<folder_sizes::Queue>,
+    trash: Rc<Trash>,
+    confirming_trash: Cell<bool>,
 }
 
 #[derive(Clone, Copy)]
@@ -163,7 +168,7 @@ impl Browser {
             .build();
         notebook.add_css_class("files-tabs");
 
-        let browser = Rc::new(Self {
+        let browser = Rc::new_cyclic(|browser: &Weak<Self>| Self {
             window: window.downgrade(),
             notebook,
             tabs: RefCell::new(Vec::new()),
@@ -173,6 +178,15 @@ impl Browser {
             archive_copies: Default::default(),
             tab_menu: RefCell::default(),
             folder_sizes: folder_sizes::Queue::new(),
+            trash: Trash::new({
+                let browser = browser.clone();
+                move |_| {
+                    if let Some(browser) = browser.upgrade() {
+                        browser.sync_trash_controls();
+                    }
+                }
+            }),
+            confirming_trash: Cell::new(false),
         });
         let content = gtk::Paned::builder()
             .orientation(gtk::Orientation::Horizontal)
@@ -262,7 +276,7 @@ impl Browser {
             &places,
             "Корзина",
             "user-trash-symbolic",
-            &gio::File::for_uri("trash:///"),
+            &gio::File::for_uri(trash::URI),
         );
         gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -514,6 +528,72 @@ impl Browser {
             .iter()
             .find(|tab| tab.page.upcast_ref::<gtk::Widget>() == &page)
             .cloned()
+    }
+
+    fn sync_trash_controls(&self) {
+        for tab in self.tabs.borrow().iter() {
+            tab.update_controls();
+        }
+    }
+
+    fn confirm_empty_trash(self: &Rc<Self>) {
+        let Some(parent) = self.window.upgrade() else {
+            return;
+        };
+        if self.trash.state() != TrashState::Full || self.confirming_trash.replace(true) {
+            return;
+        }
+        self.sync_trash_controls();
+        let confirmation = gtk::AlertDialog::builder()
+            .message("Очистить корзину?")
+            .detail("Файлы будут удалены без возможности восстановления.")
+            .buttons(["Отмена", "Удалить файлы"])
+            .cancel_button(0)
+            .default_button(0)
+            .modal(true)
+            .build();
+        let browser = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let accepted = confirmation.choose_future(Some(&parent)).await == Ok(1);
+            let Some(browser) = browser.upgrade() else {
+                return;
+            };
+            browser.confirming_trash.set(false);
+            if accepted {
+                let hold = parent.application().map(|app| app.hold());
+                let weak = Rc::downgrade(&browser);
+                browser.trash.clear_confirmed(move |result| {
+                    let _hold = hold;
+                    if let Some(browser) = weak.upgrade() {
+                        browser.trash_cleared(result);
+                    }
+                });
+            }
+            browser.sync_trash_controls();
+        });
+    }
+
+    fn trash_cleared(&self, result: Result<(), glib::Error>) {
+        let root = gio::File::for_uri(trash::URI);
+        for tab in self.tabs.borrow().clone() {
+            let current = tab.directory();
+            if current.equal(&root) {
+                tab.command(Command::Refresh);
+            } else if current.has_uri_scheme("trash") {
+                tab.open_directory(root.clone());
+            }
+        }
+        if let Err(error) = result
+            && let Some(window) = self.window.upgrade()
+        {
+            diagnostics::event("files", "empty_trash_failed", 1);
+            gtk::AlertDialog::builder()
+                .message("Не удалось полностью очистить корзину")
+                .detail(error.message())
+                .modal(true)
+                .build()
+                .show(Some(&window));
+        }
     }
 
     fn install_folder_sizes(self: &Rc<Self>) {
