@@ -275,6 +275,9 @@ with tempfile.TemporaryDirectory(prefix='mosaic-vertical-') as directory:
         if a.swaybg:
             from dock_behavior import check_transparency
             check_transparency(a,env,ctl,wait)
+        if a.dock_behavior and a.grim and a.scale in (1, 1.5):
+            from dock_behavior import check_icon_rendering
+            check_icon_rendering(a,env,ctl,wait,config_file)
         if a.live_cards:
             from live_cards import run
             run(a,env,root,children,logs,ctl,wait,windows)

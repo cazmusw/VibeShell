@@ -81,6 +81,13 @@ fn png_import_owns_a_bounded_copy_independent_of_the_original() {
     );
     let copied = load_png(&config, &selected, 64).unwrap();
     assert_eq!((copied.width(), copied.height()), (64, 32));
+    let tiny = parent.0.join("tiny.png");
+    let low_resolution = Pixbuf::new(Colorspace::Rgb, true, 8, 8, 4).unwrap();
+    low_resolution.fill(0x20a060ff);
+    low_resolution.savev(&tiny, "png", &[]).unwrap();
+    let selected_tiny = import_png(&config, &tiny).unwrap();
+    let native = load_png(&config, &selected_tiny, 160).unwrap();
+    assert_eq!((native.width(), native.height()), (8, 4));
     let mut invalid = bytes.clone();
     invalid[16..20].copy_from_slice(&4097_u32.to_be_bytes());
     fs::write(&source, invalid).unwrap();

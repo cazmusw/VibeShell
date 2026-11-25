@@ -68,6 +68,7 @@ mod images {
         size: i32,
         dimension_limit: u32,
         pixel_limit: u64,
+        upscale: bool,
     ) -> io::Result<Pixbuf> {
         if bytes.len() < 33 || !bytes.starts_with(PNG) {
             return Err(io::Error::other("a PNG image is required"));
@@ -80,6 +81,11 @@ mod images {
         {
             return Err(io::Error::other("PNG dimensions exceed the limit"));
         }
+        let size = if upscale {
+            size
+        } else {
+            size.min(width.max(height) as i32)
+        };
         let stream = gio::MemoryInputStream::from_bytes(&glib::Bytes::from_owned(bytes));
         Pixbuf::from_stream_at_scale(&stream, size, size, true, gio::Cancellable::NONE)
             .map_err(io::Error::other)
@@ -87,7 +93,7 @@ mod images {
 
     pub fn import_png(config: &Path, source: &Path) -> io::Result<String> {
         let data = bounded_file(source, SOURCE_LIMIT, true)?;
-        let pixbuf = decode_png(data, ICON_SIZE, 4096, 4 * 1024 * 1024)?;
+        let pixbuf = decode_png(data, ICON_SIZE, 4096, 4 * 1024 * 1024, false)?;
         let bytes = pixbuf
             .save_to_bufferv("png", &[])
             .map_err(io::Error::other)?;
@@ -158,6 +164,7 @@ mod images {
             size.clamp(1, ICON_SIZE),
             ICON_SIZE as u32,
             u64::from(ICON_SIZE as u32).pow(2),
+            false,
         )
         .ok()
     }

@@ -1,10 +1,13 @@
 """Behavior checks driven by a virtual pointer on the private headless seat only."""
+import hashlib
 import json
 from pathlib import Path
 import select
+import struct
 import subprocess
 import time
 import tomllib
+import zlib
 
 
 def check_transparency(args, env, ctl, wait):
@@ -78,6 +81,74 @@ def check_transparency(args, env, ctl, wait):
     result = {'passed': True, 'independent_background_transparency': True,
               'foreground_contrast_in_both_themes': True}
     (Path(args.report).parent / 'surface-transparency.json').write_text(json.dumps(result) + '\n')
+    print(json.dumps(result), flush=True)
+
+
+def check_icon_rendering(args, env, ctl, wait, config_file):
+    def state():
+        return tomllib.loads(ctl('dock', 'state').stdout)
+
+    def patch(text):
+        ctl('config', 'set', text)
+
+    def chunk(tag, payload):
+        return struct.pack('!I', len(payload)) + tag + payload + struct.pack('!I', zlib.crc32(tag + payload))
+
+    # An asymmetric 8x8 pixel image reveals interpolation.
+    magenta, green = bytes.fromhex('ff00bb'), bytes.fromhex('2cec00')
+    rows = b''.join(b'\0' + b''.join(
+        magenta if (x < 3) ^ (y < 2) else green for x in range(8)
+    ) for y in range(8))
+    data = (b'\x89PNG\r\n\x1a\n'
+            + chunk(b'IHDR', struct.pack('!2I5B', 8, 8, 8, 2, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
+    asset = hashlib.sha256(data).hexdigest() + '.png'
+    icons = config_file.with_name('dock-icons')
+    icons.mkdir(mode=0o700, exist_ok=True)
+    (icons / asset).write_bytes(data)
+    patch("dock.magnification=false\ndock.hover.cards_enabled=false\ndock.icon_filter='nearest'\n"
+          f"[dock_icons]\n'mosaic-a.desktop'='{asset}'")
+    output = tomllib.loads(ctl('outputs').stdout)['outputs'][0]
+    width, height = output['width'], output['height']
+
+    def pixels(bounds):
+        x, y, w, h = bounds
+        image = subprocess.check_output(
+            [args.grim, '-t', 'ppm', '-s', '1', '-g', f'{x},{y} {w}x{h}', '-'],
+            env=env, timeout=5,
+        )
+        fmt, size, maximum, data = image.split(b'\n', 3)
+        assert (fmt, size, maximum) == (b'P6', f'{w} {h}'.encode(), b'255')
+        return data
+
+    def source_pixels(data):
+        return sum(data[i:i+3] in (magenta, green) for i in range(0, len(data), 3))
+
+    base = state()
+    dock = ((width - base['width']) // 2, height - 12 - base['height'],
+            base['width'], base['height'])
+    nearest = wait(lambda: count if (count := source_pixels(pixels(dock))) > 500 else None)
+    patch("dock.icon_filter='linear'")
+    wait(lambda: 0 < source_pixels(pixels(dock)) < nearest)
+    patch("dock.icon_filter='smooth'")
+    assert source_pixels(pixels(dock)) > 0
+    patch("dock.icon_filter='nearest'\ndock.icon_visual_percent=50")
+    wait(lambda: 0 < source_pixels(pixels(dock)) < nearest / 2)
+    for key in ('width', 'height', 'exclusive_zone', 'layout_revision'):
+        assert state()[key] == base[key]
+
+    trash = ((width + base['width']) // 2 - 106, height - 12 - base['height'] // 2 - 18, 36, 36)
+    normal = pixels(trash)
+    patch("theme.symbolic_icon_weight='bold'")
+    wait(lambda: pixels(trash) != normal)
+    for key in ('width', 'height', 'exclusive_zone', 'layout_revision'):
+        assert state()[key] == base[key]
+    preview = Path(args.report).parent / 'preview-icon-rendering.png'
+    subprocess.run([args.grim, '-o', output['connector'], str(preview)],
+                   env=env, check=True, timeout=5)
+    result = {'passed': True, 'native_low_resolution_icon': True, 'sampling_modes': True,
+              'independent_visual_size': True, 'symbolic_weight_without_relayout': True}
+    (Path(args.report).parent / 'icon-rendering.json').write_text(json.dumps(result) + '\n')
     print(json.dumps(result), flush=True)
 
 

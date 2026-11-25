@@ -271,6 +271,12 @@ pins = ["firefox.desktop", "org.xfce.Thunar.desktop"]
 Ноль сохраняет сплошную заливку. Параметры конфигурации —
 `panel.transparency_percent` и `dock.transparency_percent`.
 
+«Размер изображения значка» регулируется от 50 до 100% ячейки Dock
+через `dock.icon_visual_percent`. Фильтрация растровых значков
+`dock.icon_filter` поддерживает `linear`, `smooth` и `nearest`.
+В разделе «Оформление» настройка `theme.symbolic_icon_weight` меняет
+толщину штатных символических значков панели и корзины Dock.
+
 `reload` перечитывает файл явно, автоматического наблюдения пока нет.
 Невалидный reload сохраняет рабочую конфигурацию. D-Bus ApplyPatch и
 ReorderPin проверяют ожидаемую revision; CLI читает её перед изменением.

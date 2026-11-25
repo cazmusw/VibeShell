@@ -166,6 +166,7 @@ struct Inner {
     hover: RefCell<HoverMotion>,
     frames: Cell<u64>,
     layout_revision: Cell<u64>,
+    icons_changed: Cell<bool>,
     actual_size: Cell<u32>,
     monitor_size: Cell<(i32, i32)>,
 }
@@ -281,6 +282,7 @@ impl Dock {
             hover: RefCell::default(),
             frames: Cell::new(0),
             layout_revision: Cell::new(0),
+            icons_changed: Cell::new(false),
             actual_size: Cell::new(48),
             monitor_size: Cell::new(monitor_size),
         });
@@ -507,6 +509,9 @@ impl Dock {
     ) {
         self.0.update(items, image, before_rebuild);
     }
+    pub fn invalidate_icons(&self) {
+        self.0.icons_changed.set(true);
+    }
     pub fn set_trash_state(&self, state: TrashState) {
         self.0.trash_state.set(state);
         if let Some(button) = self.0.trash_button.borrow().as_ref() {
@@ -556,6 +561,7 @@ impl Inner {
         let button = gtk::Button::new();
         button.add_css_class("dock-grid");
         button.add_css_class("dock-trash");
+        button.add_css_class("mosaic-symbolic");
         Dock::update_trash_button(&button, self.trash_state.get());
         let weak = Rc::downgrade(self);
         button.connect_clicked(move |_| {
@@ -789,7 +795,8 @@ impl Inner {
         image: impl Fn(&Item, i32) -> gtk::Widget,
         before_rebuild: impl FnOnce(),
     ) {
-        let same = self.layout_revision.get() > 0
+        let same = !self.icons_changed.replace(false)
+            && self.layout_revision.get() > 0
             && self
                 .buttons
                 .borrow()
@@ -1059,9 +1066,13 @@ impl Inner {
             if side { thickness } else { -1 },
             if side { -1 } else { thickness },
         );
+        let config = self.config.borrow();
+        let visual = dock_model::visual_icon_size(size, config.icon_visual_percent);
         for button in self.buttons.borrow().iter() {
-            button.icon.set_size(size as i32);
+            button.icon.set_sizes(size as i32, visual as i32);
+            button.icon.set_filter(config.icon_filter);
         }
+        drop(config);
         self.scroll.set_min_content_width(-1);
         self.scroll.set_min_content_height(-1);
         self.scroll

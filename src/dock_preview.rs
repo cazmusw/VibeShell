@@ -32,7 +32,7 @@ pub(crate) fn capture(identifier: &str) -> Option<Vec<u8>> {
 pub(crate) fn texture(bytes: Vec<u8>) -> Option<gtk::gdk::Texture> {
     use gtk::{gdk, prelude::Cast};
 
-    let pixbuf = crate::dock_icons::decode_png(bytes, 384, 2048, 2 * 1024 * 1024).ok()?;
+    let pixbuf = crate::dock_icons::decode_png(bytes, 384, 2048, 2 * 1024 * 1024, true).ok()?;
     let format = if pixbuf.has_alpha() {
         gdk::MemoryFormat::R8g8b8a8
     } else {

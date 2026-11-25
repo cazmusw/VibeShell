@@ -62,10 +62,13 @@ def run(args, env, processes, ctl, wait, config_file):
     ctl("config", "set", "theme.mode='dark'\ngeneral.reduced_motion=true")
     keys("Return", "End", "Return")
     wait(lambda: settings()["theme"]["mode"] == "system")
+    keys("Tab", "Return", "End", "Return")
+    wait(lambda: settings()["theme"]["symbolic_icon_weight"] == "bold")
     keys("Tab", "space")
     wait(lambda: not settings()["general"]["reduced_motion"])
     saved = tomllib.loads(config_file.read_text())
     assert saved["theme"]["mode"] == "system"
+    assert saved["theme"]["symbolic_icon_weight"] == "bold"
     assert saved["general"]["reduced_motion"] is False
 
     original = config_file.read_text()
@@ -107,7 +110,7 @@ def run(args, env, processes, ctl, wait, config_file):
 
     def set_panel(order, hidden):
         ctl("config", "set", f"panel.order={json.dumps(order)}\npanel.hidden={json.dumps(hidden)}")
-        assert settings()["panel"] == {"order": order, "hidden": hidden}
+        assert settings()["panel"] == {**original_panel, "order": order, "hidden": hidden}
 
     def open_first(kind, screenshot=None):
         time.sleep(.22)

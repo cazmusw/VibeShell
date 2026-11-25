@@ -2,7 +2,7 @@ use crate::{
     desktop::{self, Application as Desktop, Window},
     ipc::{ApiError, Command, DialogInfo, Shared},
     panel::{LayoutEdit, LayoutEditor},
-    settings::{self, DockEdge, PanelItem, Settings, ThemeMode},
+    settings::{self, DockEdge, IconFilter, PanelItem, Settings, SymbolicIconWeight, ThemeMode},
     temperatures::{self, Kind as SensorKind, Reading, Snapshot as Temperatures},
     toplevel::Tracker,
 };
@@ -31,8 +31,8 @@ struct AppEntry {
 }
 struct View {
     app: gtk::Application,
-    transparency_css: gtk::CssProvider,
-    transparency: Cell<(u32, u32)>,
+    appearance_css: gtk::CssProvider,
+    appearance_style: Cell<(u32, u32, SymbolicIconWeight)>,
     trash: Rc<crate::trash::Trash>,
     tray: Rc<crate::tray_ui::Tray>,
     panels: RefCell<Vec<crate::panel::Panel>>,
@@ -248,6 +248,8 @@ struct Preferences {
     hover_cards: gtk::Switch,
     minimize: gtk::Switch,
     size: gtk::SpinButton,
+    visual_size: gtk::SpinButton,
+    icon_filter: gtk::DropDown,
     show_delay: gtk::SpinButton,
     hide_delay: gtk::SpinButton,
     panel_transparency: gtk::SpinButton,
@@ -308,6 +310,18 @@ const HOVER_VALUES: [(&str, &str, f64, f64, f64); 7] = [
     ),
 ];
 
+const SYMBOLIC_WEIGHTS: [(SymbolicIconWeight, &str, &str); 3] = [
+    (SymbolicIconWeight::Default, "default", "Из темы"),
+    (SymbolicIconWeight::Medium, "medium", "Толще"),
+    (SymbolicIconWeight::Bold, "bold", "Максимальная"),
+];
+
+const ICON_FILTERS: [(IconFilter, &str, &str); 3] = [
+    (IconFilter::Linear, "linear", "Обычная"),
+    (IconFilter::Smooth, "smooth", "Сглаженная"),
+    (IconFilter::Nearest, "nearest", "Пиксельная"),
+];
+
 const HOVER_EASINGS: [(settings::HoverEasing, &str, &str); 3] = [
     (settings::HoverEasing::Linear, "linear", "Линейная"),
     (
@@ -338,6 +352,7 @@ impl PreferencesSection {
 }
 struct Appearance {
     theme: gtk::DropDown,
+    symbolic_weight: gtk::DropDown,
     reduced: gtk::Switch,
 }
 impl Appearance {
@@ -347,6 +362,12 @@ impl Appearance {
             ThemeMode::Light => 1,
             ThemeMode::System => 2,
         });
+        self.symbolic_weight.set_selected(
+            SYMBOLIC_WEIGHTS
+                .iter()
+                .position(|(weight, _, _)| *weight == settings.theme.symbolic_icon_weight)
+                .unwrap_or(0) as u32,
+        );
         self.reduced.set_active(settings.general.reduced_motion);
     }
 }
@@ -420,7 +441,17 @@ async fn read_desktop_drop(drop: &gdk::Drop) -> Option<PathBuf> {
 fn label(text: &str) -> gtk::Label {
     gtk::Label::new(Some(text))
 }
-fn file_image(path: &std::path::Path, size: i32) -> Option<gtk::Widget> {
+fn file_image(path: &std::path::Path, size: i32, native_raster: bool) -> Option<gtk::Widget> {
+    let size = if native_raster {
+        let (format, width, height) = gtk::gdk_pixbuf::Pixbuf::file_info(path)?;
+        if format.name().as_deref() == Some("svg") {
+            size
+        } else {
+            size.min(width.max(height))
+        }
+    } else {
+        size
+    };
     gtk::gdk_pixbuf::Pixbuf::from_file_at_scale(path, size, size, true)
         .ok()
         .map(pixbuf_image)
@@ -442,11 +473,11 @@ fn pixbuf_image(pixels: gtk::gdk_pixbuf::Pixbuf) -> gtk::Widget {
     gtk::Picture::for_paintable(&texture).upcast()
 }
 
-fn image(info: Option<&gio::AppInfo>, id: &str, name: &str, size: i32) -> gtk::Widget {
+fn image(info: Option<&gio::AppInfo>, id: &str, name: &str, size: i32, dock: bool) -> gtk::Widget {
     let icon = info.and_then(|a| a.icon());
     if let Some(file) = icon.and_downcast_ref::<gio::FileIcon>()
         && let Some(path) = file.file().path()
-        && let Some(image) = file_image(&path, size)
+        && let Some(image) = file_image(&path, if dock { 160 } else { size }, dock)
     {
         return image;
     }
@@ -465,10 +496,29 @@ fn image(info: Option<&gio::AppInfo>, id: &str, name: &str, size: i32) -> gtk::W
         .iter()
         .filter(|name| !name.is_empty() && !name.contains(['/', '\\', ':']))
     {
-        if display_theme
-            .as_ref()
-            .is_some_and(|theme| theme.has_icon(name))
-        {
+        if let Some(theme) = display_theme.as_ref().filter(|theme| theme.has_icon(name)) {
+            if dock && !name.ends_with("-symbolic") {
+                let icon = theme.lookup_icon(
+                    name,
+                    &[],
+                    size,
+                    1,
+                    gtk::TextDirection::None,
+                    gtk::IconLookupFlags::empty(),
+                );
+                if let Some(path) = icon.file().and_then(|file| file.path())
+                    && !path.to_string_lossy().ends_with(".symbolic.png")
+                    && path
+                        .extension()
+                        .and_then(std::ffi::OsStr::to_str)
+                        .is_some_and(|extension| {
+                            matches!(extension, "png" | "xpm" | "jpg" | "jpeg" | "webp")
+                        })
+                    && let Some(image) = file_image(&path, 160, true)
+                {
+                    return image;
+                }
+            }
             let image = gtk::Image::from_icon_name(name);
             image.set_pixel_size(size);
             return image.upcast();
@@ -478,7 +528,7 @@ fn image(info: Option<&gio::AppInfo>, id: &str, name: &str, size: i32) -> gtk::W
             for extension in ["png", "svg", "xpm"] {
                 let path = dir.join("pixmaps").join(format!("{name}.{extension}"));
                 if path.is_file()
-                    && let Some(image) = file_image(&path, size)
+                    && let Some(image) = file_image(&path, if dock { 160 } else { size }, dock)
                 {
                     return image;
                 }
@@ -1137,7 +1187,7 @@ impl View {
     }
     fn reconfigure(self: &Rc<Self>) {
         let s = self.settings.borrow().clone();
-        self.sync_transparency(&s);
+        self.sync_appearance_style(&s);
         let reduced = self.reduced_motion();
         for dock in self.docks() {
             if s.dock.edge != dock.dock.edge() {
@@ -1157,28 +1207,47 @@ impl View {
         self.sync_outputs();
         self.sync_preferences();
     }
-    fn sync_transparency(&self, settings: &Settings) {
+    fn sync_appearance_style(&self, settings: &Settings) {
         let values = (
             settings.panel.transparency_percent,
             settings.dock.transparency_percent,
+            settings.theme.symbolic_icon_weight,
         );
-        if self.transparency.replace(values) == values {
+        if self.appearance_style.replace(values) == values {
             return;
         }
         let mut css = String::new();
+        let stroke = match values.2 {
+            SymbolicIconWeight::Default => None,
+            SymbolicIconWeight::Medium => Some(0.45),
+            SymbolicIconWeight::Bold => Some(0.9),
+        };
         for (name, transparency) in [("panel", values.0), ("dock", values.1)] {
-            if transparency == 0 {
-                continue;
+            if transparency > 0 {
+                let coverage = 100 - transparency;
+                let contrast = format!("var(--mosaic-{name}-contrast)");
+                css.push_str(&format!(
+                    "window.mosaic-{name} {{ --mosaic-{name}-coverage: {coverage}%; \
+                     --mosaic-{name}-shadow: 0 1px 1px {contrast}, 0 -1px 1px {contrast}, \
+                     1px 0 1px {contrast}, -1px 0 1px {contrast}; }}\n"
+                ));
             }
-            let coverage = 100 - transparency;
-            let contrast = format!("var(--mosaic-{name}-contrast)");
-            css.push_str(&format!(
-                "window.mosaic-{name} {{ --mosaic-{name}-coverage: {coverage}%; \
-                 --mosaic-{name}-shadow: 0 1px 1px {contrast}, 0 -1px 1px {contrast}, \
-                 1px 0 1px {contrast}, -1px 0 1px {contrast}; }}\n"
-            ));
+            if let Some(stroke) = stroke {
+                // Legacy symbolic assets use filled paths. Expand their silhouette
+                // in CSS so the same control works with these and with outlined icons.
+                let contrast_shadow = if transparency > 0 {
+                    format!(", var(--mosaic-{name}-shadow)")
+                } else {
+                    String::new()
+                };
+                css.push_str(&format!(
+                    "window.mosaic-{name} .mosaic-symbolic image {{ -gtk-icon-shadow: \
+                     0 {stroke}px currentColor, 0 -{stroke}px currentColor, \
+                     {stroke}px 0 currentColor, -{stroke}px 0 currentColor{contrast_shadow}; }}\n"
+                ));
+            }
         }
-        self.transparency_css.load_from_string(&css);
+        self.appearance_css.load_from_string(&css);
     }
     fn sync_preferences(&self) {
         let s = self.settings.borrow();
@@ -1228,6 +1297,14 @@ impl View {
         p.hover_cards.set_active(hover.cards_enabled);
         p.minimize.set_active(s.dock.minimize_on_click);
         p.size.set_value(f64::from(s.dock.icon_size));
+        p.visual_size
+            .set_value(f64::from(s.dock.icon_visual_percent));
+        p.icon_filter.set_selected(
+            ICON_FILTERS
+                .iter()
+                .position(|(filter, _, _)| *filter == s.dock.icon_filter)
+                .unwrap_or(0) as u32,
+        );
         p.show_delay.set_value(s.dock.show_delay_ms as f64);
         p.hide_delay.set_value(s.dock.hide_delay_ms as f64);
         p.panel_transparency
@@ -1496,6 +1573,7 @@ impl View {
                 id,
                 app.map_or(&window.title, |app| &app.name),
                 28,
+                false,
             );
             fallback_icon.set_vexpand(true);
             fallback_icon.set_valign(gtk::Align::Center);
@@ -1946,7 +2024,7 @@ impl View {
                 if let Some(pixels) = item
                     .custom_icon
                     .as_deref()
-                    .and_then(|asset| crate::dock_icons::load_png(&self.path, asset, size))
+                    .and_then(|asset| crate::dock_icons::load_png(&self.path, asset, 160))
                 {
                     return pixbuf_image(pixels);
                 }
@@ -1955,6 +2033,7 @@ impl View {
                     &item.id,
                     &item.name,
                     size,
+                    true,
                 )
             },
             || {
@@ -2245,7 +2324,13 @@ impl View {
             let b = gtk::Button::new();
             b.add_css_class("catalog-button");
             let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-            row.append(&image(Some(&entry.info), &entry.model.id, &entry.name, 32));
+            row.append(&image(
+                Some(&entry.info),
+                &entry.model.id,
+                &entry.name,
+                32,
+                false,
+            ));
             row.append(&label(&entry.name));
             b.set_child(Some(&row));
             let weak = Rc::downgrade(self);
@@ -2362,6 +2447,16 @@ impl View {
                 view.change(&format!("theme.mode='{mode}'"));
             }
         });
+        let symbolic_weight =
+            gtk::DropDown::from_strings(&SYMBOLIC_WEIGHTS.map(|(_, _, label)| label));
+        let weak = Rc::downgrade(self);
+        symbolic_weight.connect_selected_notify(move |widget| {
+            if let Some(view) = weak.upgrade()
+                && let Some((_, key, _)) = SYMBOLIC_WEIGHTS.get(widget.selected() as usize)
+            {
+                view.change(&format!("theme.symbolic_icon_weight='{key}'"));
+            }
+        });
         let reduced = gtk::Switch::new();
         let weak = Rc::downgrade(self);
         reduced.connect_active_notify(move |toggle| {
@@ -2369,7 +2464,11 @@ impl View {
                 view.change(&format!("general.reduced_motion={}", toggle.is_active()));
             }
         });
-        Appearance { theme, reduced }
+        Appearance {
+            theme,
+            symbolic_weight,
+            reduced,
+        }
     }
 
     fn toggle_control_center(self: &Rc<Self>, source: Option<&gdk::Monitor>, hint: &str) {
@@ -2429,6 +2528,10 @@ impl View {
         let controls = gtk::Box::new(gtk::Orientation::Vertical, 12);
         let appearance = self.appearance();
         controls.append(&Self::settings_row("Тема", &appearance.theme));
+        controls.append(&Self::settings_row(
+            "Толщина символических значков",
+            &appearance.symbolic_weight,
+        ));
         controls.append(&Self::settings_row(
             "Уменьшить движение",
             &appearance.reduced,
@@ -2845,9 +2948,13 @@ impl View {
             "Основные",
         );
 
-        let theme = Self::settings_row("Тема", &appearance.theme);
+        let theme = gtk::Box::new(gtk::Orientation::Vertical, 14);
+        theme.append(&Self::settings_row("Тема", &appearance.theme));
+        theme.append(&Self::settings_row(
+            "Толщина символических значков",
+            &appearance.symbolic_weight,
+        ));
         theme.set_sensitive(!managed);
-        theme.set_valign(gtk::Align::Start);
         pages.add_titled(
             &theme,
             Some(PreferencesSection::Appearance.name()),
@@ -2910,7 +3017,25 @@ impl View {
             &minimize,
         ));
         let size = gtk::SpinButton::with_range(32., 80., 4.);
-        controls.append(&Self::settings_row("Размер значков, px", &size));
+        controls.append(&Self::settings_row("Размер ячейки значка, px", &size));
+        let visual_size = gtk::SpinButton::with_range(50., 100., 1.);
+        controls.append(&Self::settings_row(
+            "Размер изображения значка, %",
+            &visual_size,
+        ));
+        let icon_filter = gtk::DropDown::from_strings(&ICON_FILTERS.map(|(_, _, label)| label));
+        controls.append(&Self::settings_row(
+            "Фильтрация растровых иконок",
+            &icon_filter,
+        ));
+        let weak = Rc::downgrade(self);
+        icon_filter.connect_selected_notify(move |widget| {
+            if let Some(view) = weak.upgrade()
+                && let Some((_, key, _)) = ICON_FILTERS.get(widget.selected() as usize)
+            {
+                view.change(&format!("dock.icon_filter='{key}'"));
+            }
+        });
         let show_delay = gtk::SpinButton::with_range(0., 2000., 50.);
         controls.append(&Self::settings_row("Задержка показа, мс", &show_delay));
         let hide_delay = gtk::SpinButton::with_range(100., 5000., 100.);
@@ -3008,6 +3133,7 @@ impl View {
         }
         for (widget, key) in [
             (&size, "dock.icon_size"),
+            (&visual_size, "dock.icon_visual_percent"),
             (&show_delay, "dock.show_delay_ms"),
             (&hide_delay, "dock.hide_delay_ms"),
             (&panel_transparency, "panel.transparency_percent"),
@@ -3043,6 +3169,8 @@ impl View {
             hover_cards,
             minimize,
             size,
+            visual_size,
+            icon_filter,
             show_delay,
             hide_delay,
             panel_transparency,
@@ -3064,7 +3192,7 @@ pub fn run(
     }
     let (tracker, events) = Tracker::new()?;
     let provider = gtk::CssProvider::new();
-    let transparency_css = gtk::CssProvider::new();
+    let appearance_css = gtk::CssProvider::new();
     provider.load_from_string(include_str!("../assets/style.css"));
     if let Some(display) = gdk::Display::default() {
         if let Some(icons) = option_env!("MOSAIC_GTK_ICON_DIR") {
@@ -3077,7 +3205,7 @@ pub fn run(
         );
         gtk::style_context_add_provider_for_display(
             &display,
-            &transparency_css,
+            &appearance_css,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
     }
@@ -3112,8 +3240,8 @@ pub fn run(
     apps.sort_by_key(|a| a.name.to_lowercase());
     let view = Rc::new_cyclic(|owner: &std::rc::Weak<View>| View {
         app: app.clone(),
-        transparency_css,
-        transparency: Cell::default(),
+        appearance_css,
+        appearance_style: Cell::default(),
         trash: crate::trash::Trash::new({
             let owner = owner.clone();
             move |state| {
@@ -3174,6 +3302,18 @@ pub fn run(
             if let Some(v) = weak.upgrade() {
                 v.sync_outputs();
             }
+        });
+        let weak = Rc::downgrade(&view);
+        gtk::IconTheme::for_display(&display).connect_changed(move |_| {
+            let weak = weak.clone();
+            glib::idle_add_local_once(move || {
+                if let Some(view) = weak.upgrade() {
+                    for dock in view.docks() {
+                        dock.dock.invalidate_icons();
+                    }
+                    view.redraw();
+                }
+            });
         });
     }
     view.reconfigure();

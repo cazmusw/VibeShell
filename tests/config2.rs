@@ -61,6 +61,27 @@ fn typed_patch_keeps_other_fields_and_validates_ranges() {
 }
 
 #[test]
+fn icon_rendering_settings_preserve_legacy_defaults_and_validate_ranges() {
+    let old = toml::from_str::<Settings>("schema_version=2\nrevision=0\npins=[]").unwrap();
+    assert_eq!(old.theme.symbolic_icon_weight, SymbolicIconWeight::Default);
+    assert_eq!(old.dock.icon_visual_percent, 100);
+    assert_eq!(old.dock.icon_filter, IconFilter::Linear);
+    let changed = patched(&old, "theme.symbolic_icon_weight='bold'\ndock.icon_visual_percent=65\ndock.icon_filter='nearest'").unwrap();
+    assert_eq!(changed.theme.symbolic_icon_weight, SymbolicIconWeight::Bold);
+    assert_eq!(changed.dock.icon_size, old.dock.icon_size);
+    assert_eq!(changed.dock.icon_visual_percent, 65);
+    assert_eq!(changed.dock.icon_filter, IconFilter::Nearest);
+    for invalid in [
+        "theme.symbolic_icon_weight='invalid'",
+        "dock.icon_visual_percent=49",
+        "dock.icon_visual_percent=101",
+        "dock.icon_filter='invalid'",
+    ] {
+        assert!(patched(&old, invalid).is_err());
+    }
+}
+
+#[test]
 fn surface_transparency_defaults_and_persists_independently() {
     let old =
         toml::from_str::<Settings>("schema_version=2\nrevision=0\npins=[]\n[panel]\n[dock]\n")

@@ -77,7 +77,9 @@ impl Panel {
             let button = if item == PanelItem::Temperatures {
                 gtk::Button::with_label("Темп. —")
             } else if icons.has_icon(icon) {
-                gtk::Button::from_icon_name(icon)
+                let button = gtk::Button::from_icon_name(icon);
+                button.add_css_class("mosaic-symbolic");
+                button
             } else {
                 gtk::Button::with_label(title)
             };

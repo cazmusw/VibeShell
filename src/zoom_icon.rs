@@ -1,5 +1,5 @@
-use crate::settings::DockEdge;
-use gtk::{glib, prelude::*, subclass::prelude::*};
+use crate::settings::{DockEdge, IconFilter};
+use gtk::{gdk, glib, graphene, gsk, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, RefCell};
 
 fn anchor(edge: DockEdge, width: f32, height: f32) -> (f32, f32) {
@@ -15,6 +15,9 @@ mod imp {
     pub struct ZoomIcon {
         pub child: RefCell<Option<gtk::Widget>>,
         pub size: Cell<i32>,
+        pub visual: Cell<i32>,
+        pub filter: Cell<IconFilter>,
+        pub texture: std::cell::OnceCell<gdk::Texture>,
         pub scale: Cell<f64>,
         pub edge: Cell<DockEdge>,
         pub backdrop: Cell<bool>,
@@ -57,7 +60,16 @@ mod imp {
         }
         fn size_allocate(&self, width: i32, height: i32, _: i32) {
             if let Some(child) = self.child.borrow().as_ref() {
-                child.allocate(width, height, -1, None);
+                if self.backdrop.get() {
+                    child.allocate(width, height, -1, None);
+                } else {
+                    let size = self.visual.get();
+                    let placement = gsk::Transform::new().translate(&graphene::Point::new(
+                        (width - size) as f32 / 2.,
+                        (height - size) as f32 / 2.,
+                    ));
+                    child.allocate(size, size, -1, Some(placement));
+                }
             }
         }
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
@@ -73,7 +85,26 @@ mod imp {
                 let (sx, sy) = object.axes();
                 snapshot.scale(sx, sy);
                 snapshot.translate(&gtk::graphene::Point::new(-x, -y));
-                object.snapshot_child(child, snapshot);
+                if let Some(texture) = self.texture.get() {
+                    let size = self.visual.get() as f32;
+                    let ratio = size / texture.width().max(texture.height()) as f32;
+                    let width = texture.width() as f32 * ratio;
+                    let height = texture.height() as f32 * ratio;
+                    let bounds = graphene::Rect::new(
+                        (object.width() as f32 - width) / 2.,
+                        (object.height() as f32 - height) / 2.,
+                        width,
+                        height,
+                    );
+                    let filter = match self.filter.get() {
+                        IconFilter::Linear => gsk::ScalingFilter::Linear,
+                        IconFilter::Smooth => gsk::ScalingFilter::Trilinear,
+                        IconFilter::Nearest => gsk::ScalingFilter::Nearest,
+                    };
+                    snapshot.append_scaled_texture(texture, filter, &bounds);
+                } else {
+                    object.snapshot_child(child, snapshot);
+                }
                 snapshot.restore();
             }
         }
@@ -83,7 +114,14 @@ glib::wrapper! {pub struct ZoomIcon(ObjectSubclass<imp::ZoomIcon>) @extends gtk:
 impl ZoomIcon {
     pub fn new(child: &gtk::Widget, size: i32) -> Self {
         let icon = Self::wrap(child);
-        icon.set_size(size);
+        if let Some(texture) = child
+            .downcast_ref::<gtk::Picture>()
+            .and_then(gtk::Picture::paintable)
+            .and_downcast::<gdk::Texture>()
+        {
+            let _ = icon.imp().texture.set(texture);
+        }
+        icon.set_sizes(size, size);
         icon
     }
     pub fn backdrop(child: &impl IsA<gtk::Widget>) -> Self {
@@ -108,16 +146,26 @@ impl ZoomIcon {
             (1., scale)
         }
     }
-    pub fn set_size(&self, size: i32) {
-        if self.imp().size.replace(size) != size {
+    pub fn set_sizes(&self, size: i32, visual: i32) {
+        let allocation_changed = self.imp().size.replace(size) != size;
+        if self.imp().visual.replace(visual) != visual {
             if let Some(child) = self.imp().child.borrow().as_ref() {
                 if let Some(image) = child.downcast_ref::<gtk::Image>() {
-                    image.set_pixel_size(size);
+                    image.set_pixel_size(visual);
                 } else {
-                    child.set_size_request(size, size);
+                    child.set_size_request(visual, visual);
                 }
             }
+            self.queue_allocate();
+            self.queue_draw();
+        }
+        if allocation_changed {
             self.queue_resize();
+        }
+    }
+    pub fn set_filter(&self, filter: IconFilter) {
+        if self.imp().filter.replace(filter) != filter {
+            self.queue_draw();
         }
     }
     pub fn scale(&self) -> f64 {
@@ -132,11 +180,14 @@ impl ZoomIcon {
         let rect = self.compute_bounds(target)?;
         let (x, y) = anchor(self.imp().edge.get(), rect.width(), rect.height());
         let (sx, sy) = self.axes();
+        let visual = self.imp().visual.get() as f32;
+        let inset_x = (rect.width() - visual) / 2.;
+        let inset_y = (rect.height() - visual) / 2.;
         Some(gtk::graphene::Rect::new(
-            rect.x() + x * (1. - sx),
-            rect.y() + y * (1. - sy),
-            rect.width() * sx,
-            rect.height() * sy,
+            rect.x() + x * (1. - sx) + inset_x * sx,
+            rect.y() + y * (1. - sy) + inset_y * sy,
+            visual * sx,
+            visual * sy,
         ))
     }
     pub fn set_scale(&self, scale: f64) {

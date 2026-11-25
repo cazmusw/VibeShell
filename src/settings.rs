@@ -98,10 +98,20 @@ pub enum ThemeMode {
     Light,
     System,
 }
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SymbolicIconWeight {
+    #[default]
+    Default,
+    Medium,
+    Bold,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
 pub struct Theme {
     pub mode: ThemeMode,
+    pub symbolic_icon_weight: SymbolicIconWeight,
 }
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -116,12 +126,23 @@ impl DockEdge {
         self != Self::Bottom
     }
 }
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IconFilter {
+    #[default]
+    Linear,
+    Smooth,
+    Nearest,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
 pub struct Dock {
     pub transparency_percent: u32,
     pub edge: DockEdge,
     pub icon_size: u32,
+    pub icon_visual_percent: u32,
+    pub icon_filter: IconFilter,
     pub preferred_output: String,
     pub current_output_only: bool,
     pub all_outputs: bool,
@@ -138,6 +159,8 @@ impl Default for Dock {
             transparency_percent: 0,
             edge: DockEdge::Bottom,
             icon_size: 48,
+            icon_visual_percent: 100,
+            icon_filter: IconFilter::Linear,
             preferred_output: String::new(),
             current_output_only: false,
             all_outputs: false,
@@ -232,6 +255,7 @@ fn validate(s: &Settings) -> io::Result<()> {
         ));
     }
     if !(32..=80).contains(&s.dock.icon_size)
+        || !(50..=100).contains(&s.dock.icon_visual_percent)
         || s.dock.show_delay_ms > 2000
         || !(100..=5000).contains(&s.dock.hide_delay_ms)
     {

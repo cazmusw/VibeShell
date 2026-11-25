@@ -1,6 +1,13 @@
 use mosaic_shell_tools::dock_model::*;
 
 #[test]
+fn visual_icon_size_fits_the_existing_slot() {
+    assert_eq!(visual_icon_size(32, 100), 32);
+    assert_eq!(visual_icon_size(48, 50), 24);
+    assert_eq!(visual_icon_size(47, 75), 35);
+}
+
+#[test]
 fn window_indicators_keep_small_groups_and_compact_large_ones() {
     use WindowIndicator::*;
     assert_eq!(WindowIndicator::new(0, false), Empty);

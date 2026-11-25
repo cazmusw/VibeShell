@@ -308,6 +308,10 @@ pub fn fitting_icon_size(requested: u32, count: usize, width: u32) -> u32 {
         })
         .unwrap_or(32)
 }
+
+pub fn visual_icon_size(slot: u32, percent: u32) -> u32 {
+    (slot * percent + 50) / 100
+}
 pub fn pin_before_at<'a>(
     slots: impl IntoIterator<Item = (&'a str, f64)>,
     position: f64,
