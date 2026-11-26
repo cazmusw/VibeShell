@@ -1,3 +1,4 @@
+use crate::locale::tr;
 use gtk::{gio, glib, prelude::*};
 use std::{
     collections::HashSet,
@@ -43,7 +44,7 @@ impl From<io::Error> for TransferError {
 impl fmt::Display for TransferError {
     fn fmt(&self, text: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Conflict => text.write_str("Имя уже используется"),
+            Self::Conflict => text.write_str(tr("Имя уже используется")),
             Self::Io(error) => error.fmt(text),
             Self::Gio(error) => error.fmt(text),
         }
@@ -58,7 +59,7 @@ pub fn transfer(
 ) -> Result<PathBuf, TransferError> {
     let name = source
         .file_name()
-        .ok_or_else(|| io::Error::other("Нужен файл или папка"))?;
+        .ok_or_else(|| io::Error::other(tr("Нужен файл или папка")))?;
     let directory = directory.canonicalize()?;
     let same_folder = source.parent().is_some_and(|parent| {
         parent
@@ -67,7 +68,7 @@ pub fn transfer(
     });
     let metadata = fs::symlink_metadata(source)?;
     if metadata.is_dir() && directory.starts_with(source.canonicalize()?) {
-        return Err(io::Error::other("Папку нельзя поместить внутрь неё самой").into());
+        return Err(io::Error::other(tr("Папку нельзя поместить внутрь неё самой")).into());
     }
     if same_folder && kind == Kind::Move {
         return Ok(directory.join(name));
@@ -169,7 +170,7 @@ fn copy_entry(
     let entry = fs::symlink_metadata(source)?;
     if entry.is_dir() {
         if (entry.dev(), entry.ino()) == stage {
-            return Err(io::Error::other("Папку нельзя поместить внутрь неё самой").into());
+            return Err(io::Error::other(tr("Папку нельзя поместить внутрь неё самой")).into());
         }
         fs::create_dir(target)?;
         directories.push(CopyDirectory {
@@ -187,7 +188,7 @@ fn copy_entry(
             )
             .map_err(TransferError::Gio)?;
     } else {
-        return Err(io::Error::other("Этот тип объекта нельзя скопировать").into());
+        return Err(io::Error::other(tr("Этот тип объекта нельзя скопировать")).into());
     }
     Ok(())
 }

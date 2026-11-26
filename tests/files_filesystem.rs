@@ -8,7 +8,13 @@ use filesystem::{
     resolve_location, valid_name,
 };
 use gtk::{gio, glib, prelude::*};
-use std::{ffi::OsStr, fs, os::unix::ffi::OsStrExt, path::PathBuf};
+use mosaic_shell_tools::files_locale as locale;
+use std::{
+    ffi::OsStr,
+    fs,
+    os::unix::{ffi::OsStrExt, fs::PermissionsExt},
+    path::PathBuf,
+};
 
 struct TestDirectory(PathBuf);
 
@@ -123,6 +129,16 @@ fn file_names_sort_numbers_naturally_and_have_type_labels() {
     assert_eq!(names, ["zzz", "file2.txt", "file10.txt"]);
     assert_eq!(files[0].type_label, "Папка");
     assert!(!files[1].type_label.is_empty());
+    assert_eq!(
+        files[1].mode,
+        Some(
+            fs::metadata(directory.0.join("file2.txt"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o7777
+        )
+    );
 }
 
 #[test]

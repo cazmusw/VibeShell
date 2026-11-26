@@ -1,3 +1,4 @@
+use crate::locale::tr;
 use gtk::{gio, glib, prelude::*};
 use std::{
     cell::{Cell, RefCell},
@@ -41,7 +42,7 @@ impl Version {
         if info.file_type() != gio::FileType::Regular {
             return Err(error(
                 gio::IOErrorEnum::NotRegularFile,
-                "Редактор открывает обычные файлы. Для ссылки выберите исходный файл.",
+                tr("Редактор открывает обычные файлы. Для ссылки выберите исходный файл."),
             ));
         }
         let etag = info
@@ -50,7 +51,7 @@ impl Version {
             .ok_or_else(|| {
                 error(
                     gio::IOErrorEnum::NotSupported,
-                    "Система не вернула версию файла для безопасного сохранения.",
+                    tr("Система не вернула версию файла для безопасного сохранения."),
                 )
             })?;
         Ok(Self {
@@ -69,14 +70,14 @@ struct Document {
 fn changed() -> glib::Error {
     error(
         gio::IOErrorEnum::WrongEtag,
-        "Файл изменился в другом приложении. Откройте его заново перед сохранением.",
+        tr("Файл изменился в другом приложении. Откройте его заново перед сохранением."),
     )
 }
 
 fn text_limit() -> glib::Error {
     error(
         gio::IOErrorEnum::MessageTooLarge,
-        "Редактор поддерживает текстовые файлы до 1 МиБ.",
+        tr("Редактор поддерживает текстовые файлы до 1 МиБ."),
     )
 }
 
@@ -117,7 +118,7 @@ async fn read_document(file: &gio::File, info: &gio::FileInfo) -> Result<Documen
         .ok_or_else(|| {
             error(
                 gio::IOErrorEnum::InvalidData,
-                "Редактор поддерживает текстовые файлы в UTF-8.",
+                tr("Редактор поддерживает текстовые файлы в UTF-8."),
             )
         })?;
     Ok(Document { text, version })
@@ -176,14 +177,14 @@ pub async fn open(file: gio::File, parent: &gtk::Window) -> Result<bool, glib::E
 
 fn editor(file: gio::File, document: Document, parent: &gtk::Window) {
     let window = gtk::Window::builder()
-        .title("Редактор · Доступ администратора")
+        .title(tr("Редактор · Доступ администратора"))
         .transient_for(parent)
         .modal(true)
         .default_width(680)
         .default_height(480)
         .build();
     let heading = gtk::HeaderBar::new();
-    let save = gtk::Button::with_label("Сохранить");
+    let save = gtk::Button::with_label(tr("Сохранить"));
     save.add_css_class("suggested-action");
     save.set_sensitive(false);
     heading.pack_end(&save);
@@ -243,7 +244,7 @@ fn editor(file: gio::File, document: Document, parent: &gtk::Window) {
         }
         button.set_sensitive(false);
         input.set_editable(false);
-        notice.set_text("Сохранение…");
+        notice.set_text(tr("Сохранение…"));
         let text = buffer
             .text(&buffer.start_iter(), &buffer.end_iter(), true)
             .to_string();
@@ -261,9 +262,9 @@ fn editor(file: gio::File, document: Document, parent: &gtk::Window) {
                 Ok(next) => {
                     dirty.set(false);
                     notice.set_text(if next.is_some() {
-                        "Сохранено"
+                        tr("Сохранено")
                     } else {
-                        "Сохранено. Откройте файл заново, чтобы продолжить редактирование."
+                        tr("Сохранено. Откройте файл заново, чтобы продолжить редактирование.")
                     });
                     input.set_editable(next.is_some());
                     *version.borrow_mut() = next;
@@ -295,8 +296,8 @@ fn editor(file: gio::File, document: Document, parent: &gtk::Window) {
             let dirty = dirty.clone();
             glib::spawn_future_local(async move {
                 let dialog = gtk::AlertDialog::builder()
-                    .message("Закрыть без сохранения?")
-                    .buttons(["Продолжить редактирование", "Закрыть"])
+                    .message(tr("Закрыть без сохранения?"))
+                    .buttons([tr("Продолжить редактирование"), tr("Закрыть")])
                     .cancel_button(0)
                     .default_button(0)
                     .modal(true)

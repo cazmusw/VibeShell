@@ -133,6 +133,42 @@ fn a_window_can_confirm_launch_when_its_app_id_arrives_later() {
 }
 
 #[test]
+fn borderless_app_rules_hide_shell_surfaces_only_where_the_window_is_active() {
+    let mut window = Window {
+        epoch: 1,
+        id: 2,
+        app_id: "steam_app_123".into(),
+        title: "Game".into(),
+        active: true,
+        minimized: false,
+        fullscreen: false,
+        outputs: vec!["DP-1".into()],
+    };
+    let rules = vec!["steam_app_123".into()];
+    let hidden = |w: &Window, apps: &[String], output, single| {
+        shell_surfaces_hidden(std::slice::from_ref(w), apps, output, single)
+    };
+    assert!(hidden(&window, &rules, "DP-1", false));
+    assert!(!hidden(&window, &rules, "DP-2", false));
+    assert!(!hidden(&window, &[], "DP-1", false));
+    assert!(!hidden(&window, &["steam_app_12".into()], "DP-1", false));
+
+    window.minimized = true;
+    assert!(!hidden(&window, &rules, "DP-1", false));
+    window.minimized = false;
+    window.active = false;
+    assert!(!hidden(&window, &rules, "DP-1", false));
+
+    window.active = true;
+    window.fullscreen = true;
+    assert!(hidden(&window, &[], "DP-1", false));
+    window.fullscreen = false;
+    window.outputs.clear();
+    assert!(!hidden(&window, &rules, "DP-1", false));
+    assert!(hidden(&window, &rules, "DP-1", true));
+}
+
+#[test]
 fn closed_or_old_epoch_handle_is_invalid() {
     let w = Window {
         epoch: 2,

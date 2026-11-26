@@ -1,3 +1,4 @@
+use crate::locale::tr;
 use gtk::{gio, glib, prelude::*};
 use rustix::fs::{Mode, OFlags, open};
 use std::{
@@ -18,12 +19,12 @@ impl Picker {
     pub fn add(panel: &gtk::Box, name: &gtk::Entry) -> Option<Self> {
         let directory = glib::user_special_dir(glib::UserDirectory::Templates)
             .filter(|path| path != &glib::home_dir())?;
-        let label = gtk::Label::new(Some("Шаблон"));
+        let label = gtk::Label::new(Some(tr("Шаблон")));
         label.set_xalign(0.0);
-        let model = gtk::StringList::new(&["Пустой файл"]);
+        let model = gtk::StringList::new(&[tr("Пустой файл")]);
         let choice = gtk::DropDown::new(Some(model.clone()), gtk::Expression::NONE);
         label.set_mnemonic_widget(Some(&choice));
-        choice.update_property(&[gtk::accessible::Property::Label("Шаблон")]);
+        choice.update_property(&[gtk::accessible::Property::Label(tr("Шаблон"))]);
         // Hide the picker until there is a choice to make.
         label.set_visible(false);
         choice.set_visible(false);
@@ -74,7 +75,7 @@ impl Picker {
                 }
                 Ok(Ok(_)) => {}
                 _ => {
-                    label.set_text("Не удалось прочитать папку шаблонов.");
+                    label.set_text(tr("Не удалось прочитать папку шаблонов."));
                     label.set_visible(true);
                 }
             }
@@ -122,7 +123,7 @@ pub async fn create(
     let path = target.path().ok_or_else(|| {
         glib::Error::new(
             gio::IOErrorEnum::NotSupported,
-            "Шаблоны доступны для локальных папок.",
+            tr("Шаблоны доступны для локальных папок."),
         )
     })?;
     gio::spawn_blocking(move || copy(&source, &path))
@@ -130,7 +131,7 @@ pub async fn create(
         .unwrap_or_else(|_| {
             Err(glib::Error::new(
                 gio::IOErrorEnum::Failed,
-                "Ошибка при копировании шаблона.",
+                tr("Ошибка при копировании шаблона."),
             ))
         })?;
     Ok(target)
@@ -144,8 +145,8 @@ fn gio_error(error: io::Error, detail: &str) -> glib::Error {
 }
 
 fn copy(source: &Path, target: &Path) -> Result<(), glib::Error> {
-    let read_failed = |error| gio_error(error, "Шаблон недоступен или больше не существует.");
-    let write_failed = |error| gio_error(error, "Не удалось записать файл в выбранную папку.");
+    let read_failed = |error| gio_error(error, tr("Шаблон недоступен или больше не существует."));
+    let write_failed = |error| gio_error(error, tr("Не удалось записать файл в выбранную папку."));
     let mut input = File::from(
         open(
             source,
@@ -158,13 +159,13 @@ fn copy(source: &Path, target: &Path) -> Result<(), glib::Error> {
     if !input.metadata().map_err(read_failed)?.is_file() {
         return Err(glib::Error::new(
             gio::IOErrorEnum::NotRegularFile,
-            "Шаблон больше не является обычным файлом.",
+            tr("Шаблон больше не является обычным файлом."),
         ));
     }
     let parent = target.parent().ok_or_else(|| {
         glib::Error::new(
             gio::IOErrorEnum::InvalidFilename,
-            "Некорректная папка назначения.",
+            tr("Некорректная папка назначения."),
         )
     })?;
     let mut staged = tempfile::Builder::new()
@@ -173,12 +174,12 @@ fn copy(source: &Path, target: &Path) -> Result<(), glib::Error> {
         .tempfile_in(parent)
         .map_err(write_failed)?;
     io::copy(&mut input, staged.as_file_mut())
-        .map_err(|error| gio_error(error, "Не удалось скопировать содержимое шаблона."))?;
+        .map_err(|error| gio_error(error, tr("Не удалось скопировать содержимое шаблона.")))?;
     staged.persist_noclobber(target).map_err(|error| {
         if error.error.kind() == io::ErrorKind::AlreadyExists {
             glib::Error::new(
                 gio::IOErrorEnum::Exists,
-                "Объект с таким именем уже существует.",
+                tr("Объект с таким именем уже существует."),
             )
         } else {
             write_failed(error.error)

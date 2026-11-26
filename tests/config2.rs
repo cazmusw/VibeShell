@@ -61,6 +61,29 @@ fn typed_patch_keeps_other_fields_and_validates_ranges() {
 }
 
 #[test]
+fn borderless_app_rules_are_optional_and_validate_exact_ids() {
+    let base = Settings::default();
+    let next = patched(
+        &base,
+        "general.borderless_fullscreen_apps=['steam_app_123', 'My Game']",
+    )
+    .unwrap();
+    assert_ne!(base, next);
+    assert_eq!(
+        patched(&next, "general.borderless_fullscreen_apps=[]").unwrap(),
+        base,
+    );
+    for bad in [
+        "general.borderless_fullscreen_apps=['']",
+        "general.borderless_fullscreen_apps=[' a']",
+        "general.borderless_fullscreen_apps=['game', 'game']",
+        "general.borderless_fullscreen_apps=[\"a\\nb\"]",
+    ] {
+        assert!(patched(&base, bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
 fn icon_rendering_settings_preserve_legacy_defaults_and_validate_ranges() {
     let old = toml::from_str::<Settings>("schema_version=2\nrevision=0\npins=[]").unwrap();
     assert_eq!(old.theme.symbolic_icon_weight, SymbolicIconWeight::Default);

@@ -1,4 +1,5 @@
 use crate::archive_io::{self, Error, Member};
+use crate::locale::tr;
 use gtk::{gdk, gio, glib, pango, prelude::*};
 use mosaic_shell_tools::diagnostics;
 use std::{
@@ -57,35 +58,38 @@ fn error_dialog(parent: &gtk::Window, error: Error) {
         Error::Cancelled => return,
         Error::Conflict => (
             "archive_conflict",
-            "Такое имя уже существует. Выберите другое место или имя.",
+            tr("Такое имя уже существует. Выберите другое место или имя."),
         ),
         Error::Changed => (
             "archive_changed",
-            "Файл изменился во время операции. Откройте архив заново.",
+            tr("Файл изменился во время операции. Откройте архив заново."),
         ),
         Error::Io => (
             "archive_io_failed",
-            "Не удалось прочитать или записать файл. Проверьте права и свободное место.",
+            tr("Не удалось прочитать или записать файл. Проверьте права и свободное место."),
         ),
-        Error::Invalid => ("archive_invalid", "Архив повреждён или не является ZIP."),
+        Error::Invalid => (
+            "archive_invalid",
+            tr("Архив повреждён или не является ZIP."),
+        ),
         Error::Limit => (
             "archive_limit_exceeded",
-            "Превышен допустимый размер или число объектов.",
+            tr("Превышен допустимый размер или число объектов."),
         ),
         Error::UnsafePath => (
             "archive_unsafe_path",
-            "Путь, ссылка или специальный файл не подходит для этой операции.",
+            tr("Путь, ссылка или специальный файл не подходит для этой операции."),
         ),
         Error::Unsupported => (
             "archive_unsupported",
-            "Формат записи, имя файла или шифрование не поддерживается.",
+            tr("Формат записи, имя файла или шифрование не поддерживается."),
         ),
     };
     diagnostics::event("files", event, 0);
     gtk::AlertDialog::builder()
-        .message("Не удалось выполнить операцию с архивом")
+        .message(tr("Не удалось выполнить операцию с архивом"))
         .detail(message)
-        .buttons(["Закрыть"])
+        .buttons([tr("Закрыть")])
         .cancel_button(0)
         .modal(true)
         .build()
@@ -102,7 +106,7 @@ fn job<T: Send + 'static>(
     window.set_resizable(false);
     let panel = content();
     panel.append(&gtk::Spinner::builder().spinning(true).build());
-    let button = gtk::Button::with_label("Отмена");
+    let button = gtk::Button::with_label(tr("Отмена"));
     panel.append(&button);
     window.set_child(Some(&panel));
     let weak = window.downgrade();
@@ -160,17 +164,17 @@ fn prompt(
     entry.set_text(&initial_display);
     caption.set_mnemonic_widget(Some(&entry));
     row.append(&entry);
-    let browse = gtk::Button::with_label("Выбрать…");
+    let browse = gtk::Button::with_label(tr("Выбрать…"));
     row.append(&browse);
     panel.append(&row);
 
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     actions.set_halign(gtk::Align::End);
-    let cancel = gtk::Button::with_label("Отмена");
+    let cancel = gtk::Button::with_label(tr("Отмена"));
     let proceed = gtk::Button::with_label(if folder {
-        "Распаковать"
+        tr("Распаковать")
     } else {
-        "Создать ZIP"
+        tr("Создать ZIP")
     });
     proceed.add_css_class("suggested-action");
     actions.append(&cancel);
@@ -259,8 +263,8 @@ pub fn create(
     };
     prompt(
         parent,
-        "Запаковать в ZIP",
-        "Путь к новому архиву",
+        tr("Запаковать в ZIP"),
+        tr("Путь к новому архиву"),
         &initial,
         false,
         move |parent, mut destination| {
@@ -274,7 +278,7 @@ pub fn create(
             let written = destination.clone();
             job(
                 parent,
-                "Создание архива…",
+                tr("Создание архива…"),
                 move |cancel| archive_io::pack(&sources, &destination, cancel),
                 move |parent, result| match result {
                     Ok(()) => refresh(&written),
@@ -296,8 +300,8 @@ pub fn unpack_to_folder(
         .to_owned();
     prompt(
         parent,
-        "Распаковать ZIP",
-        "Папка назначения",
+        tr("Распаковать ZIP"),
+        tr("Папка назначения"),
         &initial,
         true,
         move |parent, directory| {
@@ -305,7 +309,7 @@ pub fn unpack_to_folder(
             let ready = ready.clone();
             job(
                 parent,
-                "Распаковка архива…",
+                tr("Распаковка архива…"),
                 move |cancel| archive_io::unpack(&archive, &directory, cancel),
                 move |parent, result| match result {
                     Ok(path) => ready(&path),
@@ -327,7 +331,7 @@ pub fn show(
     let source = path.clone();
     job(
         parent,
-        "Чтение ZIP…",
+        tr("Чтение ZIP…"),
         move |cancel| archive_io::list(&source, cancel),
         move |parent, result| match result {
             Ok(entries) => viewer(parent, path, entries, copies, Rc::new(refresh)),
@@ -343,16 +347,20 @@ fn viewer(
     copies: OpenCopies,
     refresh: ArchiveRefresh,
 ) {
-    let title = format!("Архив · {}", glib::filename_display_basename(&path));
+    let title = tr("Архив · {name}").replace("{name}", &glib::filename_display_basename(&path));
     let window = dialog(parent, &title, 740);
     window.set_default_height(480);
     let panel = content();
     let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let unpack = gtk::Button::with_label("Распаковать…");
-    unpack.set_tooltip_text(Some("Распаковать архив (Ctrl+E)"));
-    let open = gtk::Button::with_label("Открыть файл");
-    open.set_tooltip_text(Some("Открыть временную копию в приложении по умолчанию"));
-    let status = gtk::Label::new(Some(&format!("Объектов: {}", entries.len())));
+    let unpack = gtk::Button::with_label(tr("Распаковать…"));
+    unpack.set_tooltip_text(Some(tr("Распаковать архив (Ctrl+E)")));
+    let open = gtk::Button::with_label(tr("Открыть файл"));
+    open.set_tooltip_text(Some(tr(
+        "Открыть временную копию в приложении по умолчанию",
+    )));
+    let status = gtk::Label::new(Some(
+        &tr("Объектов: {count}").replace("{count}", &entries.len().to_string()),
+    ));
     status.set_hexpand(true);
     status.set_xalign(1.0);
     status.set_ellipsize(pango::EllipsizeMode::End);
@@ -364,7 +372,7 @@ fn viewer(
     let names = gtk::StringList::new(&[]);
     for item in &entries {
         let description = if item.directory {
-            "папка".into()
+            tr("папка").into()
         } else {
             glib::format_size(item.size)
         };
@@ -435,7 +443,7 @@ fn viewer(
         let copies = copies.clone();
         job(
             &window,
-            "Подготовка файла…",
+            tr("Подготовка файла…"),
             move |cancel| archive_io::stage_member(&path, &entry, cancel),
             move |window, result| match result {
                 Ok((temp, path)) => {
@@ -481,10 +489,10 @@ fn viewer(
         unpack_to_folder(&window, path.clone(), move |path| {
             refresh(path);
             if let Some(label) = label.upgrade() {
-                label.set_text(&format!(
-                    "Распаковано в «{}»",
-                    glib::filename_display_basename(path)
-                ));
+                label.set_text(
+                    &tr("Распаковано в «{path}»")
+                        .replace("{path}", &glib::filename_display_basename(path)),
+                );
             }
         });
     });

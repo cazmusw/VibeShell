@@ -2,6 +2,7 @@ use crate::address::AddressBar;
 use crate::filesystem::{
     self, CreateKind, FileEntry, display_location, resolve_location, valid_name,
 };
+use crate::locale::tr;
 use crate::navigation::{History, Navigation};
 use crate::transfer::{self, Batch, Kind, TransferError};
 use crate::{Browser, admin, archives, folder_sizes, photos, properties, templates};
@@ -20,6 +21,7 @@ type ItemContext = Rc<RefCell<Weak<Tab>>>;
 #[derive(Clone, Copy)]
 enum ItemAction {
     Open,
+    OpenTab,
     Pack,
     Unpack,
     OpenAsAdministrator,
@@ -34,8 +36,41 @@ impl ItemAction {
     fn hidden_when_disabled(self) -> bool {
         matches!(
             self,
-            Self::OpenAsAdministrator | Self::ToggleBookmark | Self::Pack | Self::Unpack
+            Self::OpenTab
+                | Self::OpenAsAdministrator
+                | Self::ToggleBookmark
+                | Self::Pack
+                | Self::Unpack
         )
+    }
+
+    fn menu_icon(self) -> &'static str {
+        match self {
+            Self::Open => "document-open-symbolic",
+            Self::OpenTab => "tab-new-symbolic",
+            Self::Pack => "package-x-generic-symbolic",
+            Self::Unpack => "folder-download-symbolic",
+            Self::OpenAsAdministrator => "changes-prevent-symbolic",
+            Self::ToggleBookmark => "bookmark-new-symbolic",
+            Self::CopyPath | Self::Command(Command::Clip(Kind::Copy)) => "edit-copy-symbolic",
+            Self::Command(Command::Clip(Kind::Move)) => "edit-cut-symbolic",
+            Self::Properties => "document-properties-symbolic",
+            Self::Create(CreateKind::File) => "document-new-symbolic",
+            Self::Create(CreateKind::Folder) => "folder-new-symbolic",
+            Self::Command(Command::Rename) => "document-edit-symbolic",
+            Self::Command(Command::Trash) => "user-trash-symbolic",
+            Self::Command(_) => "view-refresh-symbolic",
+        }
+    }
+
+    fn shortcut(self) -> Option<&'static str> {
+        match self {
+            Self::Command(Command::Clip(Kind::Copy)) => Some("Ctrl+C"),
+            Self::Command(Command::Clip(Kind::Move)) => Some("Ctrl+X"),
+            Self::Command(Command::Rename) => Some("F2"),
+            Self::Command(Command::Refresh) => Some("F5"),
+            _ => None,
+        }
     }
 }
 
@@ -130,11 +165,11 @@ impl Tab {
 
         let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         toolbar.add_css_class("files-toolbar");
-        let back = icon_button("go-previous-symbolic", "Назад (Alt+←)");
-        let forward = icon_button("go-next-symbolic", "Вперёд (Alt+→)");
-        let up = icon_button("go-up-symbolic", "На уровень выше (Alt+↑)");
-        let refresh = icon_button("view-refresh-symbolic", "Обновить (F5)");
-        let empty_trash = gtk::Button::with_label("Очистить корзину");
+        let back = icon_button("go-previous-symbolic", tr("Назад (Alt+←)"));
+        let forward = icon_button("go-next-symbolic", tr("Вперёд (Alt+→)"));
+        let up = icon_button("go-up-symbolic", tr("На уровень выше (Alt+↑)"));
+        let refresh = icon_button("view-refresh-symbolic", tr("Обновить (F5)"));
+        let empty_trash = gtk::Button::with_label(tr("Очистить корзину"));
         empty_trash.set_visible(false);
         let address = AddressBar::new();
         toolbar.append(&back);
@@ -147,31 +182,31 @@ impl Tab {
 
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         actions.add_css_class("files-actions");
-        let create = icon_button("folder-new-symbolic", "Новая папка (Ctrl+Shift+N)");
-        let rename = icon_button("document-edit-symbolic", "Переименовать (F2)");
-        let trash = icon_button("user-trash-symbolic", "Переместить в корзину");
+        let create = icon_button("folder-new-symbolic", tr("Новая папка (Ctrl+Shift+N)"));
+        let rename = icon_button("document-edit-symbolic", tr("Переименовать (F2)"));
+        let trash = icon_button("user-trash-symbolic", tr("Переместить в корзину"));
         let hidden = gtk::ToggleButton::builder()
             .icon_name("view-reveal-symbolic")
-            .tooltip_text("Показывать скрытые файлы (Ctrl+H)")
+            .tooltip_text(tr("Показывать скрытые файлы (Ctrl+H)"))
             .build();
         let search = gtk::SearchEntry::builder()
-            .placeholder_text("Поиск в этой папке")
+            .placeholder_text(tr("Поиск в этой папке"))
             .hexpand(true)
             .build();
         actions.append(&create);
         actions.append(&rename);
         actions.append(&trash);
         actions.append(&hidden);
-        let cut = icon_button("edit-cut-symbolic", "Вырезать (Ctrl+X)");
-        let copy = icon_button("edit-copy-symbolic", "Копировать (Ctrl+C)");
-        let paste = icon_button("edit-paste-symbolic", "Вставить (Ctrl+V)");
+        let cut = icon_button("edit-cut-symbolic", tr("Вырезать (Ctrl+X)"));
+        let copy = icon_button("edit-copy-symbolic", tr("Копировать (Ctrl+C)"));
+        let paste = icon_button("edit-paste-symbolic", tr("Вставить (Ctrl+V)"));
         actions.append(&cut);
         actions.append(&copy);
         actions.append(&paste);
         actions.append(&search);
-        let view_mode = gtk::DropDown::from_strings(&["Таблица", "Значки"]);
-        view_mode.set_tooltip_text(Some("Вид папки (Ctrl+1 / Ctrl+2)"));
-        view_mode.update_property(&[gtk::accessible::Property::Label("Вид папки")]);
+        let view_mode = gtk::DropDown::from_strings(&[tr("Таблица"), tr("Значки")]);
+        view_mode.set_tooltip_text(Some(tr("Вид папки (Ctrl+1 / Ctrl+2)")));
+        view_mode.update_property(&[gtk::accessible::Property::Label(tr("Вид папки"))]);
         actions.append(&view_mode);
         page.append(&actions);
 
@@ -522,6 +557,11 @@ impl Tab {
                 ),
                 refresh,
             ],
+            &[(
+                "Открыть в новой вкладке",
+                ItemAction::OpenTab,
+                item.as_ref().is_some_and(|(_, directory)| *directory),
+            )],
         ];
         let background_sections: &[&[(&str, ItemAction, bool)]] = &[
             &create,
@@ -532,6 +572,11 @@ impl Tab {
                     local_directory.is_some() && self.loaded.get(),
                 ),
                 refresh,
+                (
+                    "Открыть эту папку с правами администратора…",
+                    ItemAction::OpenAsAdministrator,
+                    local_directory.is_some(),
+                ),
             ],
         ];
         let sections = if position.is_some() {
@@ -553,10 +598,23 @@ impl Tab {
                 if !enabled && item.hidden_when_disabled() {
                     continue;
                 }
-                let action = gtk::Button::with_label(label);
-                if let Some(label) = action.child().and_downcast::<gtk::Label>() {
-                    label.set_xalign(0.0);
+                let label = tr(label);
+                let action = gtk::Button::new();
+                action.update_property(&[gtk::accessible::Property::Label(label)]);
+                let row = gtk::Box::new(gtk::Orientation::Horizontal, 9);
+                let icon = gtk::Image::from_icon_name(item.menu_icon());
+                icon.set_pixel_size(16);
+                row.append(&icon);
+                let caption = gtk::Label::new(Some(label));
+                caption.set_xalign(0.0);
+                caption.set_hexpand(true);
+                row.append(&caption);
+                if let Some(keys) = item.shortcut() {
+                    let hint = gtk::Label::new(Some(keys));
+                    hint.add_css_class("files-context-shortcut");
+                    row.append(&hint);
                 }
+                action.set_child(Some(&row));
                 action.add_css_class("flat");
                 action.set_sensitive(enabled);
                 let tab = Rc::downgrade(self);
@@ -629,6 +687,14 @@ impl Tab {
                     self.open_at(position);
                 }
             }
+            ItemAction::OpenTab => {
+                if let Some((file, true)) =
+                    position.and_then(|position| self.entry_target(position))
+                    && let Some(browser) = self.browser.upgrade()
+                {
+                    browser.add_tab(self.directory()).open_directory(file);
+                }
+            }
             ItemAction::Pack => {
                 if let Some(parent) = self.parent_window()
                     && let Some(directory) = self.directory().path()
@@ -650,7 +716,11 @@ impl Tab {
                 }
             }
             ItemAction::OpenAsAdministrator => {
-                if let Some((file, _)) = position.and_then(|position| self.entry_target(position)) {
+                let file = match position {
+                    Some(position) => self.entry_target(position).map(|(file, _)| file),
+                    None => Some(self.directory()),
+                };
+                if let Some(file) = file {
                     self.open_as_administrator(file);
                 }
             }
@@ -682,16 +752,25 @@ impl Tab {
                 if matches!(item, ItemAction::CopyPath) {
                     self.page.clipboard().set_text(&path);
                 } else if let Some(parent) = self.parent_window() {
-                    let mut details = format!("Путь: {path}\nТип: {}", entry.type_label);
+                    let mut details = format!(
+                        "{}: {path}\n{}: {}",
+                        tr("Путь"),
+                        tr("Тип"),
+                        entry.type_label
+                    );
                     if let Some(size) = entry.size {
-                        details.push_str(&format!("\nРазмер: {}", glib::format_size(size)));
+                        details.push_str(&format!(
+                            "\n{}: {}",
+                            tr("Размер"),
+                            glib::format_size(size)
+                        ));
                     }
                     if let Some(date) = entry
                         .modified
                         .as_ref()
                         .and_then(|date| date.format("%d.%m.%Y %H:%M").ok())
                     {
-                        details.push_str(&format!("\nИзменён: {date}"));
+                        details.push_str(&format!("\n{}: {date}", tr("Изменён")));
                     }
                     properties::show(&parent, &entry.file, &entry.name, &details);
                 }
@@ -719,7 +798,7 @@ impl Tab {
 
     pub fn bookmark_error(&self, error: &str) {
         mosaic_shell_tools::diagnostics::event("files", "bookmark_save_failed", -1);
-        self.show_error("Не удалось изменить закрепления", &error);
+        self.show_error(tr("Не удалось изменить закрепления"), &error);
     }
 
     fn open_as_administrator(self: &Rc<Self>, file: gio::File) {
@@ -732,8 +811,8 @@ impl Tab {
             admin::target(&file)
         }) else {
             self.show_error(
-                "Административный доступ недоступен",
-                &"Выберите локальный файл или папку.",
+                tr("Административный доступ недоступен"),
+                &tr("Выберите локальный файл или папку."),
             );
             return;
         };
@@ -747,7 +826,7 @@ impl Tab {
                 Err(error) if error.matches(gio::IOErrorEnum::Cancelled) => {}
                 Err(error) => tab.file_error(
                     "admin_open_failed",
-                    "Не удалось открыть с правами администратора",
+                    tr("Не удалось открыть с правами администратора"),
                     &error,
                 ),
             }
@@ -759,9 +838,9 @@ impl Tab {
             return;
         };
         let dialog = gtk::AlertDialog::builder()
-            .message("Нет доступа")
+            .message(tr("Нет доступа"))
             .detail(file.parse_name())
-            .buttons(["Отмена", "Открыть с правами администратора"])
+            .buttons([tr("Отмена"), tr("Открыть с правами администратора")])
             .cancel_button(0)
             .default_button(0)
             .modal(true)
@@ -870,7 +949,7 @@ impl Tab {
                 if file.path().is_some() && error.matches(gio::IOErrorEnum::PermissionDenied) {
                     tab.offer_admin(file);
                 } else {
-                    tab.file_error("open_file_failed", "Не удалось открыть файл", &error);
+                    tab.file_error("open_file_failed", tr("Не удалось открыть файл"), &error);
                 }
             }
         });
@@ -952,9 +1031,11 @@ impl Tab {
                 {
                     tab.offer_admin(file);
                 }
-                Err(error) => {
-                    tab.file_error("open_directory_failed", "Не удалось открыть папку", &error)
-                }
+                Err(error) => tab.file_error(
+                    "open_directory_failed",
+                    tr("Не удалось открыть папку"),
+                    &error,
+                ),
             }
             tab.update_controls();
             tab.update_status();
@@ -1008,8 +1089,8 @@ impl Tab {
             let (bytes, text) = match value {
                 Value::Cached(bytes) => (Some(bytes), format!("≈ {}", glib::format_size(bytes))),
                 Value::Measured(bytes) => (Some(bytes), glib::format_size(bytes).into()),
-                Value::Unavailable => (None, "Недоступно".into()),
-                Value::Limit => (None, "Лимит".into()),
+                Value::Unavailable => (None, tr("Недоступно").into()),
+                Value::Limit => (None, tr("Лимит").into()),
             };
             if size.update(bytes, &text) && !tab.resort_pending.replace(true) {
                 let tab = Rc::downgrade(&tab);
@@ -1079,7 +1160,10 @@ impl Tab {
                         && let Err(error) =
                             self.page.clipboard().set_content(Some(&file_offer(&files)))
                     {
-                        self.show_error("Не удалось скопировать файлы в системный буфер", &error);
+                        self.show_error(
+                            tr("Не удалось скопировать файлы в системный буфер"),
+                            &error,
+                        );
                     }
                 }
             }
@@ -1116,12 +1200,12 @@ impl Tab {
         let editable = self.loaded.get()
             && !self.loading()
             && can_navigate
-            && !directory.has_uri_scheme("trash")
-            && !directory.has_uri_scheme("admin");
+            && !directory.has_uri_scheme("trash");
         let selected = self.selection.selection().size();
         self.create.set_sensitive(editable);
         self.rename.set_sensitive(editable && selected == 1);
-        self.trash.set_sensitive(editable && selected != 0);
+        self.trash
+            .set_sensitive(editable && selected != 0 && !directory.has_uri_scheme("admin"));
         let clipboard_ready = editable && !self.clipboard.busy.get() && directory.path().is_some();
         let local_selection = clipboard_ready && selected != 0;
         self.copy.set_sensitive(local_selection);
@@ -1155,30 +1239,38 @@ impl Tab {
                 });
         } else {
             let text = if loading {
-                "Чтение папки…"
+                tr("Чтение папки…")
             } else if !self.loaded.get() {
-                "Выберите место или укажите путь"
+                tr("Выберите место или укажите путь")
             } else if !self.search.text().is_empty() {
-                "По этому запросу ничего не найдено"
+                tr("По этому запросу ничего не найдено")
             } else if self.rows.n_items() > 0 {
-                "В папке только скрытые файлы"
+                tr("В папке только скрытые файлы")
             } else {
-                "Папка пуста"
+                tr("Папка пуста")
             };
             self.empty.set_text(text);
             self.content.set_visible_child_name("empty");
         }
         let selected = self.selection.selection().size();
         let status = if loading {
-            "Чтение папки…".to_owned()
+            tr("Чтение папки…").to_owned()
         } else if self.mutating.get() {
-            "Выполняется операция…".to_owned()
+            tr("Выполняется операция…").to_owned()
         } else if let Some((_, name)) = self.selected() {
-            format!("Выбрано: {name}")
+            format!("{}: {name}", tr("Выбрано"))
         } else if selected > 0 {
-            format!("Выбрано объектов: {selected}")
+            format!("{}: {selected}", tr("Выбрано объектов"))
         } else {
-            format!("Объектов: {count}")
+            format!("{}: {count}", tr("Объектов"))
+        };
+        let admin = self.directory().has_uri_scheme("admin");
+        let status = if admin {
+            self.status.add_css_class("files-admin-status");
+            format!("{} · {status}", tr("Административный режим"))
+        } else {
+            self.status.remove_css_class("files-admin-status");
+            status
         };
         self.status.set_text(&status);
         self.status.set_tooltip_text(Some(&status));
@@ -1288,14 +1380,24 @@ impl Tab {
                 };
                 mosaic_shell_tools::diagnostics::event("files", "paste_failed", code);
                 if let Some(tab) = tab.upgrade() {
-                    tab.show_error(&format!("Вставлено: {inserted}. Ошибок: {errors}."), &error);
+                    tab.show_error(
+                        &format!(
+                            "{}: {inserted}. {}: {errors}.",
+                            tr("Вставлено"),
+                            tr("Ошибок")
+                        ),
+                        &error,
+                    );
                 }
             } else if total > 1
                 && inserted < total
                 && let Some(tab) = tab.upgrade()
             {
-                tab.notice
-                    .set_text(&format!("Вставлено: {inserted} из {total}."));
+                tab.notice.set_text(&format!(
+                    "{}: {inserted} {} {total}.",
+                    tr("Вставлено"),
+                    tr("из")
+                ));
                 tab.notice.set_visible(true);
             }
         });
@@ -1362,9 +1464,9 @@ impl Tab {
             None
         };
         let label = match action {
-            NamePrompt::Rename => "Переименовать",
-            NamePrompt::Create(CreateKind::File) => "Новый файл",
-            NamePrompt::Create(CreateKind::Folder) => "Новая папка",
+            NamePrompt::Rename => tr("Переименовать"),
+            NamePrompt::Create(CreateKind::File) => tr("Новый файл"),
+            NamePrompt::Create(CreateKind::Folder) => tr("Новая папка"),
         };
         let dialog = gtk::Window::builder()
             .title(label)
@@ -1380,7 +1482,7 @@ impl Tab {
         content.set_margin_bottom(16);
         content.set_margin_start(16);
         content.set_margin_end(16);
-        let caption = gtk::Label::new(Some("Имя"));
+        let caption = gtk::Label::new(Some(tr("Имя")));
         caption.set_xalign(0.0);
         let entry = gtk::Entry::builder().activates_default(true).build();
         if let Some((_, original, _)) = &target {
@@ -1398,11 +1500,11 @@ impl Tab {
         content.append(&entry);
         let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         buttons.set_halign(gtk::Align::End);
-        let cancel = gtk::Button::with_label("Отмена");
+        let cancel = gtk::Button::with_label(tr("Отмена"));
         let save = gtk::Button::with_label(if matches!(action, NamePrompt::Rename) {
-            "Сохранить"
+            tr("Сохранить")
         } else {
-            "Создать"
+            tr("Создать")
         });
         save.add_css_class("suggested-action");
         save.set_sensitive(valid_name(&entry.text()));
@@ -1481,15 +1583,16 @@ impl Tab {
         let question = self.selected().map_or_else(
             || {
                 format!(
-                    "Переместить выделенные объекты в корзину? ({})",
+                    "{} ({})",
+                    tr("Переместить выделенные объекты в корзину?"),
                     files.len()
                 )
             },
-            |(_, name)| format!("Переместить «{name}» в корзину?"),
+            |(_, name)| format!("{} «{name}»", tr("Переместить в корзину?")),
         );
         let confirmation = gtk::AlertDialog::builder()
             .message(question)
-            .buttons(["Отмена", "В корзину"])
+            .buttons([tr("Отмена"), tr("В корзину")])
             .cancel_button(0)
             .default_button(0)
             .modal(true)
@@ -1533,14 +1636,16 @@ impl Tab {
                         CreateKind::File if from_template => (
                             result,
                             "create_from_template_failed",
-                            "Не удалось создать файл из шаблона",
+                            tr("Не удалось создать файл из шаблона"),
                         ),
                         CreateKind::File => {
-                            (result, "create_file_failed", "Не удалось создать файл")
+                            (result, "create_file_failed", tr("Не удалось создать файл"))
                         }
-                        CreateKind::Folder => {
-                            (result, "create_folder_failed", "Не удалось создать папку")
-                        }
+                        CreateKind::Folder => (
+                            result,
+                            "create_folder_failed",
+                            tr("Не удалось создать папку"),
+                        ),
                     }
                 }
                 Operation::Rename(file, name) => (
@@ -1548,7 +1653,7 @@ impl Tab {
                         .await
                         .map(|_| ()),
                     "rename_failed",
-                    "Не удалось переименовать объект",
+                    tr("Не удалось переименовать объект"),
                 ),
                 Operation::Trash(files) => {
                     let total = files.len();
@@ -1566,7 +1671,7 @@ impl Tab {
                     (
                         first_error.map_or(Ok(()), Err),
                         "trash_failed",
-                        "Не удалось переместить в корзину",
+                        tr("Не удалось переместить в корзину"),
                     )
                 }
             };
@@ -1594,7 +1699,7 @@ impl Tab {
                 {
                     tab.file_error(
                         event,
-                        &format!("В корзине {done} из {total}. {message}"),
+                        &format!("{} {done} {} {total}. {message}", tr("В корзине"), tr("из")),
                         &error,
                     );
                 } else {
@@ -1611,16 +1716,16 @@ async fn conflict_choice(tab: &Weak<Tab>, source: &Path, group: bool) -> Option<
     let window = tab.upgrade()?.parent_window()?;
     let name = source.file_name().map(glib::filename_display_name);
     let detail = name.map_or_else(
-        || "Можно вставить объект под новым именем.".to_owned(),
-        |name| format!("«{name}» можно вставить под новым именем."),
+        || tr("Можно вставить объект под новым именем.").to_owned(),
+        |name| format!("«{name}» {}", tr("можно вставить под новым именем.")),
     );
     let buttons: &[&str] = if group {
-        &["Отмена", "Сохранить оба", "Пропустить"]
+        &[tr("Отмена"), tr("Сохранить оба"), tr("Пропустить")]
     } else {
-        &["Отмена", "Сохранить оба"]
+        &[tr("Отмена"), tr("Сохранить оба")]
     };
     gtk::AlertDialog::builder()
-        .message("Объект с таким именем уже существует")
+        .message(tr("Объект с таким именем уже существует"))
         .detail(detail)
         .buttons(buttons)
         .cancel_button(0)
@@ -1650,7 +1755,7 @@ async fn transfer_job(
     gio::spawn_blocking(move || transfer::transfer(&source, &directory, kind, keep_both))
         .await
         .unwrap_or_else(|_| {
-            Err(std::io::Error::other("Фоновая операция завершилась ошибкой").into())
+            Err(std::io::Error::other(tr("Фоновая операция завершилась ошибкой")).into())
         })
 }
 
@@ -1877,27 +1982,15 @@ fn file_list(
 ) -> (gtk::ColumnView, gtk::MultiSelection, gtk::CustomSorter) {
     let view = gtk::ColumnView::new(None::<gtk::SelectionModel>);
     view.add_css_class("files-list");
-    view.set_show_row_separators(true);
+    view.set_show_column_separators(true);
     view.set_enable_rubberband(true);
-    let name = gtk::ColumnViewColumn::new(Some("Имя"), Some(file_factory(false, context)));
+    let name = gtk::ColumnViewColumn::new(Some(tr("Имя")), Some(file_factory(false, context)));
     name.set_expand(true);
     name.set_sorter(Some(&file_sorter(|a, b| a.name_key.cmp(&b.name_key))));
     name.set_resizable(true);
     view.append_column(&name);
 
-    let kind = details_column("Тип", 140, context, |entry| entry.type_label.clone());
-    kind.set_sorter(Some(&file_sorter(|a, b| a.type_label.cmp(&b.type_label))));
-    view.append_column(&kind);
-
-    let size = size_column(context);
-    let size_sorter = file_sorter(|a, b| {
-        let bytes = |entry: &FileEntry| entry.size.or_else(|| entry.folder_size.as_ref()?.bytes());
-        bytes(a).cmp(&bytes(b))
-    });
-    size.set_sorter(Some(&size_sorter));
-    view.append_column(&size);
-
-    let modified = details_column("Изменён", 155, context, |entry| {
+    let modified = details_column(tr("Изменён"), 155, context, |entry| {
         entry
             .modified
             .as_ref()
@@ -1906,6 +1999,21 @@ fn file_list(
     });
     modified.set_sorter(Some(&file_sorter(|a, b| a.modified.cmp(&b.modified))));
     view.append_column(&modified);
+    let attributes = details_column(tr("Атрибуты"), 140, context, |entry| {
+        entry.mode.map_or_else(
+            || "—".into(),
+            |mode| filesystem::permission_label(mode).into(),
+        )
+    });
+    attributes.set_sorter(Some(&file_sorter(|a, b| a.mode.cmp(&b.mode))));
+    view.append_column(&attributes);
+    let size = size_column(context);
+    let size_sorter = file_sorter(|a, b| {
+        let bytes = |entry: &FileEntry| entry.size.or_else(|| entry.folder_size.as_ref()?.bytes());
+        bytes(a).cmp(&bytes(b))
+    });
+    size.set_sorter(Some(&size_sorter));
+    view.append_column(&size);
     view.sort_by_column(Some(&name), gtk::SortType::Ascending);
     let sorters = gtk::MultiSorter::new();
     sorters.append(file_sorter(|a, b| b.is_directory.cmp(&a.is_directory)));
@@ -2004,7 +2112,7 @@ fn size_column(context: &ItemContext) -> gtk::ColumnViewColumn {
             }
         });
     });
-    let column = gtk::ColumnViewColumn::new(Some("Размер"), Some(factory));
+    let column = gtk::ColumnViewColumn::new(Some(tr("Размер")), Some(factory));
     column.set_fixed_width(96);
     column.set_resizable(true);
     column

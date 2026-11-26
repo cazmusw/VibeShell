@@ -3,6 +3,7 @@
 #[path = "../src/bin/mosaic_files/transfer.rs"]
 mod transfer;
 
+use mosaic_shell_tools::files_locale as locale;
 use std::{
     fs,
     os::unix::fs::{PermissionsExt, symlink},

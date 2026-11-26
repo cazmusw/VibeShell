@@ -1,0 +1,89 @@
+# Russian source<TAB>English translation
+Назад (Alt+←)	Back (Alt+←)
+Вперёд (Alt+→)	Forward (Alt+→)
+На уровень выше (Alt+↑)	Up one level (Alt+↑)
+Обновить (F5)	Refresh (F5)
+Очистить корзину	Empty Trash
+Новая папка (Ctrl+Shift+N)	New folder (Ctrl+Shift+N)
+Переименовать (F2)	Rename (F2)
+Переместить в корзину	Move to Trash
+Показывать скрытые файлы (Ctrl+H)	Show hidden files (Ctrl+H)
+Поиск в этой папке	Search this folder
+Вырезать (Ctrl+X)	Cut (Ctrl+X)
+Копировать (Ctrl+C)	Copy (Ctrl+C)
+Вставить (Ctrl+V)	Paste (Ctrl+V)
+Таблица	Details
+Значки	Icons
+Вид папки (Ctrl+1 / Ctrl+2)	Folder view (Ctrl+1 / Ctrl+2)
+Вид папки	Folder view
+Открепить папку	Unpin folder
+Закрепить папку слева	Pin folder to sidebar
+Новый файл…	New file…
+Новая папка…	New folder…
+Обновить	Refresh
+Открыть архив	Open archive
+Открыть	Open
+Вырезать	Cut
+Копировать	Copy
+Копировать путь	Copy path
+Переименовать	Rename
+В корзину	Move to Trash
+Свойства	Properties
+Запаковать…	Compress…
+Распаковать…	Extract…
+Открыть с правами администратора…	Open as administrator…
+Открыть в новой вкладке	Open in new tab
+Открыть эту папку с правами администратора…	Open this folder as administrator…
+Не удалось изменить закрепления	Could not update pinned folders
+Административный доступ недоступен	Administrator access is unavailable
+Выберите локальный файл или папку.	Choose a local file or folder.
+Не удалось открыть с правами администратора	Could not open as administrator
+Нет доступа	Access denied
+Отмена	Cancel
+Открыть с правами администратора	Open as administrator
+Не удалось открыть файл	Could not open file
+Не удалось открыть папку	Could not open folder
+Недоступно	Unavailable
+Лимит	Limit
+Не удалось скопировать файлы в системный буфер	Could not copy files to the system clipboard
+Чтение папки…	Reading folder…
+Выберите место или укажите путь	Choose a location or enter a path
+По этому запросу ничего не найдено	No matches found
+В папке только скрытые файлы	This folder contains only hidden files
+Папка пуста	This folder is empty
+Выполняется операция…	Working…
+Новый файл	New file
+Новая папка	New folder
+Имя	Name
+Сохранить	Save
+Создать	Create
+Не удалось создать файл из шаблона	Could not create file from template
+Не удалось создать файл	Could not create file
+Не удалось создать папку	Could not create folder
+Не удалось переименовать объект	Could not rename item
+Не удалось переместить в корзину	Could not move to Trash
+Можно вставить объект под новым именем.	The item can be pasted with a new name.
+Сохранить оба	Keep both
+Пропустить	Skip
+Объект с таким именем уже существует	An item with that name already exists
+Фоновая операция завершилась ошибкой	The background operation failed
+Изменён	Modified
+Атрибуты	Permissions
+Размер	Size
+Папка	Folder
+Файл	File
+Корзина	Trash
+Некорректное имя	Invalid name
+Административный режим	Administrator mode
+Путь	Path
+Тип	Type
+Выбрано	Selected
+Выбрано объектов	Selected items
+Объектов	Items
+Вставлено	Pasted
+Ошибок	Errors
+из	of
+В корзине	In Trash
+Переместить выделенные объекты в корзину?	Move selected items to Trash?
+Переместить в корзину?	Move to Trash?
+можно вставить под новым именем.	can be pasted with a new name.

@@ -1,3 +1,4 @@
+use crate::locale::tr;
 use crate::tab::icon_button;
 use gtk::{gdk, gio, glib, graphene, prelude::*};
 use image::{ImageDecoder, ImageFormat, ImageReader};
@@ -101,10 +102,10 @@ pub fn show(parent: &gtk::Window, mut photos: Vec<Photo>, selected: Photo) {
         .build();
     window.set_application(parent.application().as_ref());
 
-    let previous = icon_button("go-previous-symbolic", "Предыдущее фото (←)");
-    let next = icon_button("go-next-symbolic", "Следующее фото (→)");
+    let previous = icon_button("go-previous-symbolic", tr("Предыдущее фото (←)"));
+    let next = icon_button("go-next-symbolic", tr("Следующее фото (→)"));
     let zoom = gtk::DropDown::from_strings(&[
-        "По окну",
+        tr("По окну"),
         "25 %",
         "50 %",
         "75 %",
@@ -112,7 +113,7 @@ pub fn show(parent: &gtk::Window, mut photos: Vec<Photo>, selected: Photo) {
         "150 %",
         "200 %",
     ]);
-    zoom.set_tooltip_text(Some("Масштаб (+, −, 0)"));
+    zoom.set_tooltip_text(Some(tr("Масштаб (+, −, 0)")));
     zoom.set_sensitive(false);
     let count = gtk::Label::new(None);
     let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -238,10 +239,9 @@ impl Viewer {
         let index = self.index.get();
         let path = &self.photos[index].path;
         if let Some(window) = self.window.upgrade() {
-            window.set_title(Some(&format!(
-                "Фото · {}",
-                glib::filename_display_basename(path)
-            )));
+            window.set_title(Some(
+                &tr("Фото · {name}").replace("{name}", &glib::filename_display_basename(path)),
+            ));
         }
         self.count
             .set_text(&format!("{} / {}", index + 1, self.photos.len()));
@@ -250,7 +250,7 @@ impl Viewer {
         self.picture.set_paintable(gdk::Paintable::NONE);
         self.texture.take();
         self.zoom.set_sensitive(false);
-        self.status.set_text("Загрузка…");
+        self.status.set_text(tr("Загрузка…"));
         self.body.set_visible_child(&self.status);
 
         // Decode only one photo at a time. If navigation outruns decoding, load the latest choice.
@@ -286,14 +286,16 @@ impl Viewer {
             Ok(pixels) => pixels,
             Err(error) => {
                 let (event, message) = match error {
-                    DecodeError::Read => ("photo_read_failed", "Не удалось прочитать изображение"),
+                    DecodeError::Read => {
+                        ("photo_read_failed", tr("Не удалось прочитать изображение"))
+                    }
                     DecodeError::Format => (
                         "photo_decode_failed",
-                        "Изображение повреждено или его формат не поддерживается",
+                        tr("Изображение повреждено или его формат не поддерживается"),
                     ),
                     DecodeError::Limit => (
                         "photo_limit_exceeded",
-                        "Изображение превышает допустимый размер",
+                        tr("Изображение превышает допустимый размер"),
                     ),
                 };
                 diagnostics::event("files", event, 0);

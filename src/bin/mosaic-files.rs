@@ -27,13 +27,14 @@ mod transfer;
 
 use bookmarks::Bookmarks;
 use gtk::{gdk, gio, glib, graphene, prelude::*};
+use locale::{Language, tr};
 use mosaic_shell_tools::{
-    diagnostics,
+    diagnostics, files_locale as locale,
     trash::{self, Trash, TrashState},
 };
 use std::{
     cell::{Cell, RefCell},
-    path::Path,
+    path::{Path, PathBuf},
     rc::{Rc, Weak},
 };
 use tab::{Clipboard, Command, Tab, icon_button, unparent_popup};
@@ -42,6 +43,7 @@ const APPLICATION_ID: &str = "org.mosaic.Files";
 
 fn main() -> glib::ExitCode {
     diagnostics::install_panic_hook("files");
+    locale::initialize(&language_preference());
     diagnostics::event("files", "start", 0);
     let app = gtk::Application::builder()
         .application_id(APPLICATION_ID)
@@ -143,21 +145,23 @@ enum TabAction {
 
 impl Browser {
     fn new(app: &gtk::Application) -> (Rc<Self>, gtk::ApplicationWindow) {
+        let (width, height) = initial_window_size(display_bounds());
         let window = gtk::ApplicationWindow::builder()
             .application(app)
-            .title("Файлы · Mosaic")
-            .default_width(1000)
-            .default_height(660)
+            .title(tr("Файлы · Mosaic"))
+            .default_width(width)
+            .default_height(height)
             .build();
         window.add_css_class("mosaic-files");
 
         let header = gtk::HeaderBar::new();
-        let header_title = gtk::Label::new(Some("Файлы"));
+        let header_title = gtk::Label::new(Some(tr("Файлы")));
         header_title.add_css_class("title");
         header.set_title_widget(Some(&header_title));
-        let new_tab = icon_button("tab-new-symbolic", "Новая вкладка (Ctrl+T)");
+        let new_tab = icon_button("tab-new-symbolic", tr("Новая вкладка (Ctrl+T)"));
         new_tab.set_action_name(Some("win.new-tab"));
         header.pack_start(&new_tab);
+        header.pack_end(&language_button(&window));
         window.set_titlebar(Some(&header));
 
         let notebook = gtk::Notebook::builder()
@@ -223,38 +227,38 @@ impl Browser {
     fn places(self: &Rc<Self>) -> gtk::ScrolledWindow {
         let places = gtk::Box::new(gtk::Orientation::Vertical, 4);
         places.add_css_class("files-places");
-        let title = gtk::Label::new(Some("Места"));
+        let title = gtk::Label::new(Some(tr("Места")));
         title.set_xalign(0.0);
         title.add_css_class("files-places-heading");
         places.append(&title);
         let home = home();
-        self.add_place(&places, "Домашняя папка", "user-home-symbolic", &home);
+        self.add_place(&places, tr("Домашняя папка"), "user-home-symbolic", &home);
         places.append(&self.pinned);
         self.refresh_bookmarks();
         for (location, name, icon) in [
             (
                 glib::UserDirectory::Downloads,
-                "Загрузки",
+                tr("Загрузки"),
                 "folder-download-symbolic",
             ),
             (
                 glib::UserDirectory::Documents,
-                "Документы",
+                tr("Документы"),
                 "folder-documents-symbolic",
             ),
             (
                 glib::UserDirectory::Pictures,
-                "Изображения",
+                tr("Изображения"),
                 "folder-pictures-symbolic",
             ),
             (
                 glib::UserDirectory::Music,
-                "Музыка",
+                tr("Музыка"),
                 "folder-music-symbolic",
             ),
             (
                 glib::UserDirectory::Videos,
-                "Видео",
+                tr("Видео"),
                 "folder-videos-symbolic",
             ),
         ] {
@@ -268,13 +272,13 @@ impl Browser {
         places.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         self.add_place(
             &places,
-            "Файловая система",
+            tr("Файловая система"),
             "drive-harddisk-symbolic",
             &gio::File::for_path("/"),
         );
         self.add_place(
             &places,
-            "Корзина",
+            tr("Корзина"),
             "user-trash-symbolic",
             &gio::File::for_uri(trash::URI),
         );
@@ -349,7 +353,7 @@ impl Browser {
         if paths.is_empty() {
             return;
         }
-        let title = gtk::Label::new(Some("Закреплённые"));
+        let title = gtk::Label::new(Some(tr("Закреплённые")));
         title.set_xalign(0.0);
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
         title.add_css_class("files-places-heading");
@@ -362,7 +366,7 @@ impl Browser {
                 "folder-symbolic",
                 &file,
             ));
-            let remove = icon_button("window-close-symbolic", "Открепить папку");
+            let remove = icon_button("window-close-symbolic", tr("Открепить папку"));
             remove.add_css_class("flat");
             let browser = Rc::downgrade(self);
             let path = path.clone();
@@ -503,7 +507,7 @@ impl Browser {
         let tab = Tab::new(&directory, self.clipboard.clone(), Rc::downgrade(self));
         let label = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         label.append(&tab.title);
-        let close = icon_button("window-close-symbolic", "Закрыть вкладку (Ctrl+W)");
+        let close = icon_button("window-close-symbolic", tr("Закрыть вкладку (Ctrl+W)"));
         close.add_css_class("flat");
         close.add_css_class("files-tab-close");
         label.append(&close);
@@ -545,9 +549,9 @@ impl Browser {
         }
         self.sync_trash_controls();
         let confirmation = gtk::AlertDialog::builder()
-            .message("Очистить корзину?")
-            .detail("Файлы будут удалены без возможности восстановления.")
-            .buttons(["Отмена", "Удалить файлы"])
+            .message(tr("Очистить корзину?"))
+            .detail(tr("Файлы будут удалены без возможности восстановления."))
+            .buttons([tr("Отмена"), tr("Удалить файлы")])
             .cancel_button(0)
             .default_button(0)
             .modal(true)
@@ -588,7 +592,7 @@ impl Browser {
         {
             diagnostics::event("files", "empty_trash_failed", 1);
             gtk::AlertDialog::builder()
-                .message("Не удалось полностью очистить корзину")
+                .message(tr("Не удалось полностью очистить корзину"))
                 .detail(error.message())
                 .modal(true)
                 .build()
@@ -672,23 +676,27 @@ impl Browser {
 
         for (section_number, items) in [
             &[
-                ("Переместить влево", TabAction::MoveLeft, index > 0),
+                (tr("Переместить влево"), TabAction::MoveLeft, index > 0),
                 (
-                    "Переместить вправо",
+                    tr("Переместить вправо"),
                     TabAction::MoveRight,
                     index + 1 < count,
                 ),
             ][..],
             &[
-                ("Закрыть вкладку", TabAction::Close, true),
-                ("Закрыть другие вкладки", TabAction::CloseOthers, count > 1),
-                ("Закрыть вкладки слева", TabAction::CloseLeft, index > 0),
+                (tr("Закрыть вкладку"), TabAction::Close, true),
                 (
-                    "Закрыть вкладки справа",
+                    tr("Закрыть другие вкладки"),
+                    TabAction::CloseOthers,
+                    count > 1,
+                ),
+                (tr("Закрыть вкладки слева"), TabAction::CloseLeft, index > 0),
+                (
+                    tr("Закрыть вкладки справа"),
                     TabAction::CloseRight,
                     index + 1 < count,
                 ),
-                ("Обновить", TabAction::Refresh, true),
+                (tr("Обновить"), TabAction::Refresh, true),
             ],
         ]
         .into_iter()
@@ -770,4 +778,104 @@ impl Browser {
 
 fn home() -> gio::File {
     gio::File::for_path(glib::home_dir())
+}
+
+fn language_preference() -> PathBuf {
+    glib::user_config_dir().join("mosaic-files/language")
+}
+
+fn language_button(window: &gtk::ApplicationWindow) -> gtk::MenuButton {
+    let menu = gio::Menu::new();
+    for language in Language::ALL {
+        let item = gio::MenuItem::new(Some(language.name()), None);
+        item.set_action_and_target_value(Some("win.language"), Some(&language.code().to_variant()));
+        menu.append_item(&item);
+    }
+
+    let action = gio::SimpleAction::new_stateful(
+        "language",
+        Some(glib::VariantTy::STRING),
+        &locale::current().code().to_variant(),
+    );
+    let parent = window.downgrade();
+    action.connect_change_state(move |action, value| {
+        let Some(value) = value else {
+            return;
+        };
+        let Some(language) = value.str().and_then(Language::from_code) else {
+            return;
+        };
+        if action.state().as_ref() == Some(value) {
+            return;
+        }
+        let Some(window) = parent.upgrade() else {
+            return;
+        };
+        let dialog = gtk::AlertDialog::builder().buttons([tr("ОК")]).modal(true);
+        match language.save(&language_preference()) {
+            Ok(()) => {
+                action.set_state(value);
+                if language != locale::current() {
+                    dialog
+                        .message(tr("Язык интерфейса сохранён"))
+                        .detail(tr("Перезапустите Mosaic Files, чтобы применить язык."))
+                        .build()
+                        .show(Some(&window));
+                }
+            }
+            Err(error) => dialog
+                .message(tr("Не удалось сохранить язык интерфейса"))
+                .detail(error.to_string())
+                .build()
+                .show(Some(&window)),
+        }
+    });
+    window.add_action(&action);
+
+    let button = gtk::MenuButton::builder()
+        .label(tr("Язык"))
+        .menu_model(&menu)
+        .tooltip_text(tr("Язык интерфейса"))
+        .build();
+    button.add_css_class("flat");
+    button
+}
+
+fn display_bounds() -> Option<(i32, i32)> {
+    let monitors = gdk::Display::default()?.monitors();
+    // The compositor chooses the output when a new window is presented.
+    (0..monitors.n_items())
+        .filter_map(|index| monitors.item(index)?.downcast::<gdk::Monitor>().ok())
+        .map(|monitor| monitor.geometry())
+        .filter(|geometry| geometry.width() > 0 && geometry.height() > 0)
+        .map(|geometry| (geometry.width(), geometry.height()))
+        .reduce(|(width, height), (other_width, other_height)| {
+            (width.min(other_width), height.min(other_height))
+        })
+}
+
+fn initial_window_size(bounds: Option<(i32, i32)>) -> (i32, i32) {
+    let Some((width, height)) = bounds else {
+        return (1500, 990);
+    };
+    let (preferred_width, preferred_height) = if width <= 1280 || height <= 720 {
+        (1000, 660)
+    } else {
+        (1500, 990)
+    };
+    (preferred_width.min(width), preferred_height.min(height))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn initial_window_fits_the_available_display() {
+        assert_eq!(initial_window_size(None), (1500, 990));
+        assert_eq!(initial_window_size(Some((1920, 1080))), (1500, 990));
+        assert_eq!(initial_window_size(Some((1280, 720))), (1000, 660));
+        assert_eq!(initial_window_size(Some((1600, 900))), (1500, 900));
+        assert_eq!(initial_window_size(Some((800, 600))), (800, 600));
+    }
 }

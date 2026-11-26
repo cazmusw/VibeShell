@@ -19,6 +19,8 @@ pub mod dock_model;
 pub mod dock_preview;
 pub mod doctor;
 #[cfg(feature = "desktop")]
+pub mod files_locale;
+#[cfg(feature = "desktop")]
 pub mod ipc;
 #[cfg(feature = "desktop")]
 pub mod network;

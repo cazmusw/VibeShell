@@ -1,3 +1,4 @@
+use crate::locale::tr;
 use gtk::{gdk, gio, glib, pango, prelude::*};
 use mosaic_shell_tools::diagnostics;
 use rustix::{
@@ -82,7 +83,7 @@ impl Target {
 
 pub fn show(parent: &gtk::Window, file: &gio::File, name: &str, details: &str) {
     let window = gtk::Window::builder()
-        .title(format!("Свойства · {name}"))
+        .title(tr("Свойства · {name}").replace("{name}", name))
         .transient_for(parent)
         .destroy_with_parent(true)
         .modal(true)
@@ -106,7 +107,7 @@ pub fn show(parent: &gtk::Window, file: &gio::File, name: &str, details: &str) {
         .build();
     panel.append(&overview);
     panel.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-    let title = gtk::Label::new(Some("Права доступа"));
+    let title = gtk::Label::new(Some(tr("Права доступа")));
     title.set_xalign(0.0);
     title.add_css_class("heading");
     panel.append(&title);
@@ -115,12 +116,12 @@ pub fn show(parent: &gtk::Window, file: &gio::File, name: &str, details: &str) {
         .column_spacing(20)
         .row_spacing(8)
         .build();
-    let columns = ["Чтение", "Запись", "Выполнение"];
-    let rows = ["Владелец", "Группа", "Остальные"];
+    let columns = [tr("Чтение"), tr("Запись"), tr("Выполнение")];
+    let rows = [tr("Владелец"), tr("Группа"), tr("Остальные")];
     for (index, name) in columns.iter().enumerate() {
         let header = gtk::Label::new(Some(name));
-        if *name == "Выполнение" {
-            header.set_tooltip_text(Some("Для папки — вход и доступ к её содержимому"));
+        if index == 2 {
+            header.set_tooltip_text(Some(tr("Для папки — вход и доступ к её содержимому")));
         }
         grid.attach(&header, index as i32 + 1, 0, 1, 1);
     }
@@ -150,11 +151,11 @@ pub fn show(parent: &gtk::Window, file: &gio::File, name: &str, details: &str) {
 
     let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     buttons.set_halign(gtk::Align::End);
-    let apply = gtk::Button::with_label("Применить");
+    let apply = gtk::Button::with_label(tr("Применить"));
     apply.add_css_class("suggested-action");
-    apply.set_tooltip_text(Some("Применить права доступа (Ctrl+S)"));
+    apply.set_tooltip_text(Some(tr("Применить права доступа (Ctrl+S)")));
     apply.set_sensitive(false);
-    let close = gtk::Button::with_label("Закрыть");
+    let close = gtk::Button::with_label(tr("Закрыть"));
     buttons.append(&close);
     buttons.append(&apply);
     panel.append(&buttons);
@@ -215,12 +216,12 @@ pub fn show(parent: &gtk::Window, file: &gio::File, name: &str, details: &str) {
     window.present();
 
     let Some(path) = file.path() else {
-        editor
-            .message
-            .set_text("Редактирование прав доступно для локальных файлов и папок.");
+        editor.message.set_text(tr(
+            "Редактирование прав доступно для локальных файлов и папок.",
+        ));
         return;
     };
-    editor.message.set_text("Чтение прав доступа…");
+    editor.message.set_text(tr("Чтение прав доступа…"));
     let weak = Rc::downgrade(&editor);
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || Target::open(path)).await;
@@ -285,7 +286,7 @@ impl Editor {
             check.set_active(mode & bit != 0);
         }
         self.actual
-            .set_text(&format!("Фактические права: {mode:04o}"));
+            .set_text(&tr("Фактические права: {mode}").replace("{mode}", &format!("{mode:04o}")));
         self.update_apply();
     }
 
@@ -302,7 +303,7 @@ impl Editor {
         }
         self.saving.set(true);
         self.set_editable(false);
-        self.message.set_text("Сохранение прав доступа…");
+        self.message.set_text(tr("Сохранение прав доступа…"));
 
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
@@ -324,7 +325,7 @@ impl Editor {
                 (Ok(mode), _) => {
                     editor.show_mode(mode);
                     editor.message.remove_css_class("error");
-                    editor.message.set_text("Права доступа сохранены.");
+                    editor.message.set_text(tr("Права доступа сохранены."));
                 }
                 (Err(error), actual) => {
                     if error == Error::Changed {
@@ -345,24 +346,24 @@ impl Editor {
         let (event, text) = match error {
             Error::Link => (
                 None,
-                "Это символическая ссылка. Чтобы изменить права, откройте свойства её цели.",
+                tr("Это символическая ссылка. Чтобы изменить права, откройте свойства её цели."),
             ),
             Error::Unsupported => (
                 None,
-                "Редактирование прав доступно для обычных файлов и папок.",
+                tr("Редактирование прав доступно для обычных файлов и папок."),
             ),
             Error::Changed => (
                 Some(("permissions_target_changed", 0)),
-                "Объект перемещён или заменён. Откройте его свойства заново.",
+                tr("Объект перемещён или заменён. Откройте его свойства заново."),
             ),
             Error::System(error) => {
                 let text = match error {
                     Errno::ACCESS | Errno::PERM => {
-                        "Доступ запрещён. У вас недостаточно прав для этой операции."
+                        tr("Доступ запрещён. У вас недостаточно прав для этой операции.")
                     }
-                    Errno::ROFS => "Файловая система доступна только для чтения.",
-                    Errno::NOENT => "Файл или папка больше не существует.",
-                    _ => "Не удалось прочитать или изменить права доступа.",
+                    Errno::ROFS => tr("Файловая система доступна только для чтения."),
+                    Errno::NOENT => tr("Файл или папка больше не существует."),
+                    _ => tr("Не удалось прочитать или изменить права доступа."),
                 };
                 (Some(("permissions_failed", error.raw_os_error())), text)
             }

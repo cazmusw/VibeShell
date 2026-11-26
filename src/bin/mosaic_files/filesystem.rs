@@ -1,3 +1,4 @@
+use crate::locale::tr;
 use gtk::{gio, glib, prelude::*};
 
 mod size_object {
@@ -56,6 +57,7 @@ pub struct FileEntry {
     pub icon: Option<gio::Icon>,
     pub is_directory: bool,
     pub is_hidden: bool,
+    pub mode: Option<u32>,
     pub size: Option<u64>,
     pub folder_size: Option<FolderSize>,
     pub modified: Option<glib::DateTime>,
@@ -64,7 +66,7 @@ pub struct FileEntry {
 pub async fn read_directory(directory: &gio::File) -> Result<Vec<FileEntry>, glib::Error> {
     let enumerator = directory
         .enumerate_children_future(
-            "standard::name,standard::display-name,standard::type,standard::is-hidden,standard::is-symlink,standard::icon,standard::size,standard::fast-content-type,time::modified",
+            "standard::name,standard::display-name,standard::type,standard::is-hidden,standard::is-symlink,standard::icon,standard::size,standard::fast-content-type,time::modified,unix::mode",
             gio::FileQueryInfoFlags::NONE,
             glib::Priority::DEFAULT,
         )
@@ -83,11 +85,11 @@ pub async fn read_directory(directory: &gio::File) -> Result<Vec<FileEntry>, gli
             let is_directory = kind == gio::FileType::Directory;
             let search_name = glib::casefold(&name);
             let type_label = if is_directory {
-                "Папка".into()
+                tr("Папка").into()
             } else {
                 info.attribute_string("standard::fast-content-type")
                     .map_or_else(
-                        || "Файл".into(),
+                        || tr("Файл").into(),
                         |mime| gio::content_type_get_description(&mime),
                     )
             };
@@ -103,6 +105,9 @@ pub async fn read_directory(directory: &gio::File) -> Result<Vec<FileEntry>, gli
                 icon: info.icon(),
                 is_directory,
                 is_hidden: info.is_hidden(),
+                mode: info
+                    .has_attribute("unix::mode")
+                    .then(|| info.attribute_uint32("unix::mode") & 0o7777),
                 size: (kind == gio::FileType::Regular)
                     .then(|| u64::try_from(info.size()).ok())
                     .flatten(),
@@ -120,9 +125,29 @@ pub async fn read_directory(directory: &gio::File) -> Result<Vec<FileEntry>, gli
     Ok(entries)
 }
 
+pub fn permission_label(mode: u32) -> String {
+    let mut label = String::with_capacity(9);
+    for (shift, special, lower, upper) in [
+        (6, 0o4000, 's', 'S'),
+        (3, 0o2000, 's', 'S'),
+        (0, 0o1000, 't', 'T'),
+    ] {
+        let bits = mode >> shift;
+        label.push(if bits & 4 != 0 { 'r' } else { '-' });
+        label.push(if bits & 2 != 0 { 'w' } else { '-' });
+        label.push(match (bits & 1 != 0, mode & special != 0) {
+            (true, true) => lower,
+            (false, true) => upper,
+            (true, false) => 'x',
+            (false, false) => '-',
+        });
+    }
+    label
+}
+
 pub fn display_location(file: &gio::File) -> glib::GString {
     if file.has_uri_scheme("trash") && file.parent().is_none() {
-        "Корзина".into()
+        tr("Корзина").into()
     } else {
         file.basename()
             .and_then(|name| name.file_name().map(glib::filename_display_name))
@@ -167,7 +192,7 @@ pub fn named_child(directory: &gio::File, name: &str) -> Result<gio::File, glib:
     if !valid_name(name) {
         return Err(glib::Error::new(
             gio::IOErrorEnum::InvalidFilename,
-            "Некорректное имя",
+            tr("Некорректное имя"),
         ));
     }
     directory.child_for_display_name(name)
@@ -193,4 +218,16 @@ pub async fn create_entry(
         }
     }
     Ok(target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::permission_label;
+
+    #[test]
+    fn attributes_render_unix_permissions_without_file_type_bits() {
+        assert_eq!(permission_label(0o100644), "rw-r--r--");
+        assert_eq!(permission_label(0o041750), "rwxr-x--T");
+        assert_eq!(permission_label(0o106650), "rwSr-s---");
+    }
 }

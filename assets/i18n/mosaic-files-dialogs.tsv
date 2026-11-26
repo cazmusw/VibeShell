@@ -1,0 +1,88 @@
+# Russian source<TAB>English text for secondary dialogs. Keep named placeholders in translations.
+Путь к папке	Folder path
+Редактировать путь (Ctrl+L)	Edit Path (Ctrl+L)
+Шаблон	Template
+Пустой файл	Empty File
+Не удалось прочитать папку шаблонов.	Could not read the templates folder.
+Шаблоны доступны для локальных папок.	Templates are available for local folders.
+Ошибка при копировании шаблона.	Could not copy the template.
+Шаблон недоступен или больше не существует.	The template is unavailable or no longer exists.
+Не удалось записать файл в выбранную папку.	Could not write the file in the chosen folder.
+Шаблон больше не является обычным файлом.	The template is no longer a regular file.
+Некорректная папка назначения.	The destination folder is invalid.
+Не удалось скопировать содержимое шаблона.	Could not copy the template contents.
+Объект с таким именем уже существует.	An item with this name already exists.
+Редактор открывает обычные файлы. Для ссылки выберите исходный файл.	The editor opens regular files. To edit a linked file, select its target.
+Система не вернула версию файла для безопасного сохранения.	The system did not provide the file version required to save safely.
+Файл изменился в другом приложении. Откройте его заново перед сохранением.	Another application changed the file. Reopen it before saving.
+Редактор поддерживает текстовые файлы до 1 МиБ.	The editor supports text files up to 1 MiB.
+Редактор поддерживает текстовые файлы в UTF-8.	The editor supports UTF-8 text files.
+Редактор · Доступ администратора	Editor · Administrator Access
+Сохранение…	Saving…
+Сохранено	Saved
+Сохранено. Откройте файл заново, чтобы продолжить редактирование.	Saved. Reopen the file to continue editing.
+Закрыть без сохранения?	Close without saving?
+Продолжить редактирование	Continue Editing
+Закрыть	Close
+Такое имя уже существует. Выберите другое место или имя.	This name already exists. Choose a different location or name.
+Файл изменился во время операции. Откройте архив заново.	The file changed during the operation. Reopen the archive.
+Не удалось прочитать или записать файл. Проверьте права и свободное место.	Could not read or write the file. Check permissions and available disk space.
+Архив повреждён или не является ZIP.	The archive is damaged or is in a format other than ZIP.
+Превышен допустимый размер или число объектов.	The size or item count exceeds the limit.
+Путь, ссылка или специальный файл не подходит для этой операции.	The operation cannot use this path, link, or special file.
+Формат записи, имя файла или шифрование не поддерживается.	The archive entry format, filename, or encryption is unsupported.
+Не удалось выполнить операцию с архивом	Could not finish the archive operation
+Выбрать…	Choose…
+Распаковать	Extract
+Создать ZIP	Create ZIP
+Запаковать в ZIP	Compress to ZIP
+Путь к новому архиву	New archive path
+Создание архива…	Creating archive…
+Распаковать ZIP	Extract ZIP
+Папка назначения	Destination folder
+Распаковка архива…	Extracting archive…
+Чтение ZIP…	Reading ZIP…
+Архив · {name}	Archive · {name}
+Распаковать архив (Ctrl+E)	Extract Archive (Ctrl+E)
+Открыть файл	Open File
+Открыть временную копию в приложении по умолчанию	Open a temporary copy in the default application
+Объектов: {count}	Items: {count}
+папка	folder
+Подготовка файла…	Preparing file…
+Распаковано в «{path}»	Extracted to “{path}”
+Предыдущее фото (←)	Previous Photo (←)
+Следующее фото (→)	Next Photo (→)
+По окну	Fit to Window
+Масштаб (+, −, 0)	Zoom (+, −, 0)
+Фото · {name}	Photo · {name}
+Загрузка…	Loading…
+Не удалось прочитать изображение	Could not read the image
+Изображение повреждено или его формат не поддерживается	The image is damaged or uses an unsupported format
+Изображение превышает допустимый размер	The image exceeds the size limit
+Свойства · {name}	Properties · {name}
+Права доступа	Permissions
+Чтение	Read
+Запись	Write
+Выполнение	Execute
+Владелец	Owner
+Группа	Group
+Остальные	Others
+Для папки — вход и доступ к её содержимому	For a folder, grants access to its contents
+Применить	Apply
+Применить права доступа (Ctrl+S)	Apply Permissions (Ctrl+S)
+Редактирование прав доступно для локальных файлов и папок.	You can edit permissions for local files and folders.
+Чтение прав доступа…	Reading permissions…
+Фактические права: {mode}	Current permissions: {mode}
+Сохранение прав доступа…	Saving permissions…
+Права доступа сохранены.	Permissions saved.
+Это символическая ссылка. Чтобы изменить права, откройте свойства её цели.	This is a symbolic link. Open its target’s properties to edit permissions.
+Редактирование прав доступно для обычных файлов и папок.	You can edit permissions for regular files and folders.
+Объект перемещён или заменён. Откройте его свойства заново.	The item was moved or replaced. Reopen its properties.
+Доступ запрещён. У вас недостаточно прав для этой операции.	Access denied. You lack the permissions required for this operation.
+Файловая система доступна только для чтения.	The file system is read-only.
+Файл или папка больше не существует.	The file or folder no longer exists.
+Не удалось прочитать или изменить права доступа.	Could not read or change permissions.
+Имя уже используется	The name is already in use
+Нужен файл или папка	A file or folder is required
+Папку нельзя поместить внутрь неё самой	A folder cannot be placed inside itself
+Этот тип объекта нельзя скопировать	This item type cannot be copied

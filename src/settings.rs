@@ -89,6 +89,8 @@ impl Default for Panel {
 #[serde(deny_unknown_fields, default)]
 pub struct General {
     pub reduced_motion: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub borderless_fullscreen_apps: Vec<String>,
 }
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -248,6 +250,20 @@ fn validate(s: &Settings) -> io::Result<()> {
     if s.dock.preferred_output.len() > 256 || s.dock.preferred_output.chars().any(char::is_control)
     {
         return Err(io::Error::other("invalid preferred output"));
+    }
+    let borderless_apps = &s.general.borderless_fullscreen_apps;
+    if borderless_apps.len() > 128
+        || borderless_apps.iter().enumerate().any(|(index, id)| {
+            id.is_empty()
+                || id.chars().count() > 256
+                || id.trim() != id
+                || id.chars().any(char::is_control)
+                || borderless_apps[..index].contains(id)
+        })
+    {
+        return Err(io::Error::other(
+            "invalid borderless fullscreen application IDs",
+        ));
     }
     if s.panel.transparency_percent > 100 || s.dock.transparency_percent > 100 {
         return Err(io::Error::other(

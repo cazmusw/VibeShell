@@ -317,7 +317,7 @@ def run(args, env, root, children, logs, ctl, wait, windows):
         (view_source / name).write_text(data)
 
     open_folder(view_source)
-    click(931, 228)
+    click(1090, 228)
     time.sleep(.25)
     click(420, 264)
     control("2")
@@ -367,7 +367,7 @@ def run(args, env, root, children, logs, ctl, wait, windows):
 
     # Let the initial asynchronous URI lookup populate the toolbar.
     time.sleep(.4)
-    click(931, 228)  # The smaller file now precedes example.txt.
+    click(1090, 228)  # The smaller file now precedes example.txt.
     time.sleep(.25)
     if args.grim:
         subprocess.run([args.grim, "-o", "HEADLESS-1", str(Path(args.report).with_name("preview-files-sort.png"))],
@@ -816,7 +816,7 @@ def run(args, env, root, children, logs, ctl, wait, windows):
     wait(lambda: cached_folder_bytes() == 321, seconds=5)
     if args.grim:
         def size_cell():
-            return subprocess.check_output([args.grim, "-g", "890,248 94x46", "-"],
+            return subprocess.check_output([args.grim, "-g", "1045,248 94x46", "-"],
                                            env=env, timeout=5)
 
         before_size_change = size_cell()

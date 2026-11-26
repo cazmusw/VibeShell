@@ -42,12 +42,23 @@
 }
 
 .files-context-menu .files-context-actions {
-    min-width: 154px;
+    min-width: 236px;
 }
 
 .files-context-menu .files-context-actions > button {
     min-height: 26px;
-    padding: 1px 8px;
+    padding: 1px 10px;
+    border-radius: 4px;
+}
+
+.files-context-menu > contents {
+    border: 1px solid alpha(currentColor, 0.24);
+    border-radius: 8px;
+}
+
+.files-context-menu .files-context-shortcut {
+    font-size: 0.87em;
+    opacity: 0.72;
 }
 
 .files-context-menu .files-context-actions > separator {
@@ -76,6 +87,19 @@
     min-height: 34px;
 }
 
+.mosaic-files .files-list > header {
+    background-color: alpha(currentColor, 0.06);
+    border-bottom: 1px solid alpha(currentColor, 0.16);
+}
+
+.mosaic-files .files-list > listview > row:nth-child(even):not(:selected) {
+    background-color: alpha(currentColor, 0.035);
+}
+
+.mosaic-files .files-list > listview > row:hover:not(:selected) {
+    background-color: alpha(currentColor, 0.085);
+}
+
 .mosaic-files .files-grid {
     padding: 12px;
 }
@@ -100,6 +124,12 @@
 .mosaic-files .files-status {
     padding: 7px 12px;
     border-top: 1px solid alpha(currentColor, 0.12);
+}
+
+.mosaic-files .files-admin-status {
+    background-color: rgba(183, 115, 24, 0.18);
+    font-weight: 600;
+    opacity: 1;
 }
 
 .mosaic-files .files-notice {

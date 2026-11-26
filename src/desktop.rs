@@ -15,6 +15,26 @@ pub struct Window {
     pub outputs: Vec<String>,
 }
 
+impl Window {
+    pub fn on_output(&self, output: &str, single_output: bool) -> bool {
+        self.outputs.iter().any(|name| name == output) || (single_output && self.outputs.is_empty())
+    }
+}
+
+pub fn shell_surfaces_hidden(
+    windows: &[Window],
+    borderless_apps: &[String],
+    output: &str,
+    single_output: bool,
+) -> bool {
+    windows.iter().any(|window| {
+        window.active
+            && !window.minimized
+            && window.on_output(output, single_output)
+            && (window.fullscreen || borderless_apps.contains(&window.app_id))
+    })
+}
+
 pub fn match_app(app_id: &str, apps: &[Application]) -> Option<String> {
     if app_id.is_empty() {
         return None;

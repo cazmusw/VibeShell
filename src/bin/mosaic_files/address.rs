@@ -1,4 +1,5 @@
 use crate::filesystem::{display_location, location_components};
+use crate::locale::tr;
 use gtk::{gdk, gio, glib, pango, prelude::*};
 
 pub struct AddressBar {
@@ -28,7 +29,7 @@ impl AddressBar {
         stack.add_named(&scroller, Some("segments"));
 
         let entry = gtk::Entry::builder()
-            .placeholder_text("Путь к папке")
+            .placeholder_text(tr("Путь к папке"))
             .width_chars(10)
             .hexpand(true)
             .build();
@@ -37,7 +38,8 @@ impl AddressBar {
         stack.add_named(&entry, Some("text"));
         widget.append(&stack);
 
-        let edit = crate::tab::icon_button("document-edit-symbolic", "Редактировать путь (Ctrl+L)");
+        let edit =
+            crate::tab::icon_button("document-edit-symbolic", tr("Редактировать путь (Ctrl+L)"));
         edit.add_css_class("flat");
         widget.append(&edit);
         let keys = gtk::EventControllerKey::new();

@@ -237,6 +237,7 @@ struct Preferences {
     window: gtk::ApplicationWindow,
     pages: gtk::Stack,
     appearance: Appearance,
+    borderless_apps: gtk::TextBuffer,
     dock_edge: gtk::DropDown,
     preferred: gtk::Entry,
     current_output_only: gtk::Switch,
@@ -1267,6 +1268,8 @@ impl View {
     fn sync_full_preferences(&self, p: &Preferences, s: &Settings) {
         p.error.set_visible(false);
         p.appearance.sync(s);
+        p.borderless_apps
+            .set_text(&s.general.borderless_fullscreen_apps.join("\n"));
         p.dock_edge.set_selected(match s.dock.edge {
             DockEdge::Bottom => 0,
             DockEdge::Left => 1,
@@ -2045,8 +2048,13 @@ impl View {
     fn redraw(self: &Rc<Self>) {
         let windows = self.windows.borrow();
         let only = self.panels.borrow().len() == 1;
-        let on_output = |w: &Window, name: &str| {
-            w.outputs.iter().any(|n| n == name) || (only && w.outputs.is_empty())
+        let shell_surfaces_hidden = |output: &str| {
+            desktop::shell_surfaces_hidden(
+                &windows,
+                &self.settings.borrow().general.borderless_fullscreen_apps,
+                output,
+                only,
+            )
         };
         for dock in self.docks() {
             self.redraw_dock(&dock, &windows);
@@ -2055,10 +2063,7 @@ impl View {
                 .as_ref()
                 .and_then(gdk::Monitor::connector)
                 .unwrap_or_default();
-            let fullscreen = monitor.is_some()
-                && windows
-                    .iter()
-                    .any(|w| w.active && w.fullscreen && on_output(w, &selected));
+            let fullscreen = monitor.is_some() && shell_surfaces_hidden(&selected);
             if fullscreen {
                 dock.close_cards();
                 dock.close_popup();
@@ -2067,14 +2072,10 @@ impl View {
         }
         for panel in self.panels.borrow().iter() {
             let connector = panel.connector();
-            panel.window.set_visible(
-                !windows
-                    .iter()
-                    .any(|w| w.active && w.fullscreen && on_output(w, &connector)),
-            );
+            panel.window.set_visible(!shell_surfaces_hidden(&connector));
             if let Some(w) = windows
                 .iter()
-                .find(|w| w.active && on_output(w, &connector))
+                .find(|w| w.active && w.on_output(&connector, only))
             {
                 let key = self.key(w);
                 panel
@@ -2932,6 +2933,47 @@ impl View {
         let reduced = Self::settings_row("Уменьшить движение", &appearance.reduced);
         reduced.set_sensitive(!managed);
         general.append(&reduced);
+
+        let borderless = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        borderless.set_sensitive(!managed);
+        let borderless_title = "Полноэкранные приложения без рамки";
+        let heading = label(borderless_title);
+        heading.add_css_class("heading");
+        borderless.append(&heading);
+        let help = label(
+            "Панель и Dock скрываются, пока приложение из списка активно. Укажите по одному app ID из shellctl windows на строку.",
+        );
+        help.set_wrap(true);
+        borderless.append(&help);
+        let app_ids = gtk::TextView::new();
+        app_ids.update_property(&[gtk::accessible::Property::Label(borderless_title)]);
+        let borderless_apps = app_ids.buffer();
+        let list = gtk::ScrolledWindow::builder()
+            .min_content_height(80)
+            .has_frame(true)
+            .child(&app_ids)
+            .build();
+        borderless.append(&list);
+        let apply = gtk::Button::with_label("Применить");
+        apply.set_halign(gtk::Align::Start);
+        let weak = Rc::downgrade(self);
+        let buffer = borderless_apps.clone();
+        apply.connect_clicked(move |_| {
+            if let Some(view) = weak.upgrade() {
+                let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), true);
+                let ids = text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                    .map(|id| toml::Value::String(id.into()))
+                    .collect();
+                let value = toml::Value::Array(ids);
+                view.change(&format!("general.borderless_fullscreen_apps={value}"));
+            }
+        });
+        borderless.append(&apply);
+        general.append(&borderless);
+
         let close = gtk::Button::with_label("Завершить оболочку");
         close.set_halign(gtk::Align::Start);
         let app = self.app.downgrade();
@@ -3157,6 +3199,7 @@ impl View {
             window: window.clone(),
             pages,
             appearance,
+            borderless_apps,
             dock_edge,
             preferred,
             current_output_only,

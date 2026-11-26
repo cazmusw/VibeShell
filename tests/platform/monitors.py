@@ -42,6 +42,11 @@ def run(args,env,ctl,wait,fixture):
     ctl('window','activate',*w[:2])
     wait(lambda:fixture()[3]=='true')
     active=wait(lambda:output_of(w))[0]
+    patch(f"general.borderless_fullscreen_apps=[{w[2]}]")
+    wait(lambda: {o['connector'] for o in panels()} == {'HEADLESS-1', 'HEADLESS-2'} - {active})
+    assert dock_state()['visible'] == (active != 'HEADLESS-2')
+    patch("general.borderless_fullscreen_apps=[]")
+    wait(lambda: len(panels()) == 2)
     other=next(o for o in topology() if o['connector']!=active)
     patch(f"dock.preferred_output='{other['connector']}'")
     # The virtual pointer speaks layout-relative coordinates. Mosaic only
