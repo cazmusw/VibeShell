@@ -44,3 +44,83 @@ fn new_wifi_profile_accepts_only_rsn_personal_modes() {
         assert_eq!(personal_mode(unsupported), None);
     }
 }
+
+#[test]
+fn ethernet_snapshot_works_without_wifi_and_ignores_virtual_device_types() {
+    use mosaic_shell_tools::network::{EthernetLink, decode_snapshot};
+    use zbus::{
+        fdo::ManagedObjects,
+        zvariant::{OwnedObjectPath, OwnedValue, Value},
+    };
+
+    let path = |id: &str| OwnedObjectPath::try_from(id).unwrap();
+    let physical = path("/org/freedesktop/NetworkManager/Devices/2");
+    let virtual_link = path("/org/freedesktop/NetworkManager/Devices/3");
+    let mut objects = ManagedObjects::new();
+    objects.insert(
+        path("/org/freedesktop/NetworkManager"),
+        [(
+            "org.freedesktop.NetworkManager".try_into().unwrap(),
+            [(
+                "Devices".into(),
+                OwnedValue::try_from(Value::from(vec![physical.clone(), virtual_link.clone()]))
+                    .unwrap(),
+            )]
+            .into(),
+        )]
+        .into(),
+    );
+    for (device, kind, carrier) in [(physical.clone(), 1_u32, true), (virtual_link, 20, true)] {
+        objects.insert(
+            device,
+            [
+                (
+                    "org.freedesktop.NetworkManager.Device".try_into().unwrap(),
+                    [
+                        ("DeviceType".into(), OwnedValue::from(kind)),
+                        (
+                            "Interface".into(),
+                            OwnedValue::try_from(Value::from("enp14s0")).unwrap(),
+                        ),
+                        ("Managed".into(), OwnedValue::from(true)),
+                        ("State".into(), OwnedValue::from(100_u32)),
+                    ]
+                    .into(),
+                ),
+                (
+                    "org.freedesktop.NetworkManager.Device.Wired"
+                        .try_into()
+                        .unwrap(),
+                    [
+                        ("Carrier".into(), OwnedValue::from(carrier)),
+                        ("Speed".into(), OwnedValue::from(2500_u32)),
+                    ]
+                    .into(),
+                ),
+            ]
+            .into(),
+        );
+    }
+    let connected = decode_snapshot(&objects);
+    assert!(!connected.enabled);
+    assert!(connected.adapters.is_empty());
+    assert_eq!(connected.ethernet.len(), 1);
+    assert_eq!(connected.ethernet[0].name, "enp14s0");
+    assert_eq!(connected.ethernet[0].link, EthernetLink::Connected);
+    assert_eq!(connected.ethernet[0].speed_mbps, 2500);
+
+    let wired = objects
+        .get_mut(&physical)
+        .unwrap()
+        .iter_mut()
+        .find(|(interface, _)| interface.as_str().ends_with(".Wired"))
+        .unwrap()
+        .1;
+    wired.insert("Carrier".into(), OwnedValue::from(false));
+    let unplugged = decode_snapshot(&objects);
+    assert_eq!(unplugged.ethernet[0].link, EthernetLink::NoCarrier);
+    assert_eq!(unplugged.ethernet[0].speed_mbps, 0);
+    let round_trip = toml::from_str(&toml::to_string(&connected).unwrap()).unwrap();
+    assert_eq!(connected, round_trip);
+    assert!(decode_snapshot(&ManagedObjects::new()).ethernet.is_empty());
+}

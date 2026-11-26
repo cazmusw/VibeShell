@@ -2487,7 +2487,7 @@ impl View {
             return;
         };
         if let Some(header) = body.first_child().and_downcast::<gtk::HeaderBar>() {
-            let wifi = gtk::Button::with_label("Wi-Fi");
+            let wifi = gtk::Button::with_label("Сеть");
             let weak = Rc::downgrade(self);
             let source = monitor.clone();
             wifi.connect_clicked(move |_| {
@@ -2604,8 +2604,7 @@ impl View {
         let Some(monitor) = self.dialog_monitor(source, hint) else {
             return;
         };
-        let Some((window, body)) =
-            self.dialog_window(DialogKind::Wifi, &monitor, "Wi-Fi", 450, 470)
+        let Some((window, body)) = self.dialog_window(DialogKind::Wifi, &monitor, "Сеть", 450, 470)
         else {
             return;
         };

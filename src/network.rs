@@ -20,6 +20,7 @@ use zbus::{
 const NM: &str = "org.freedesktop.NetworkManager";
 const NM_ROOT: &str = "/org/freedesktop/NetworkManager";
 const DEVICE: &str = "org.freedesktop.NetworkManager.Device";
+const WIRED: &str = "org.freedesktop.NetworkManager.Device.Wired";
 const WIRELESS: &str = "org.freedesktop.NetworkManager.Device.Wireless";
 const ACCESS_POINT: &str = "org.freedesktop.NetworkManager.AccessPoint";
 const MAX_ADAPTERS: usize = 16;
@@ -34,6 +35,28 @@ pub struct WifiSnapshot {
     pub enabled: bool,
     pub hardware_enabled: bool,
     pub adapters: Vec<WifiAdapter>,
+    #[serde(default)]
+    pub ethernet: Vec<EthernetAdapter>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct EthernetAdapter {
+    pub name: String,
+    pub link: EthernetLink,
+    pub speed_mbps: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EthernetLink {
+    Connected,
+    Connecting,
+    Disconnecting,
+    Disconnected,
+    NoCarrier,
+    Unmanaged,
+    Unavailable,
+    Failed,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -183,15 +206,22 @@ pub fn decode_snapshot(objects: &ManagedObjects) -> WifiSnapshot {
     let enabled = property(manager, "WirelessEnabled").unwrap_or(false);
     let hardware_enabled = property(manager, "WirelessHardwareEnabled").unwrap_or(false);
     let mut adapters = Vec::new();
+    let mut ethernet = Vec::new();
     for path in array::<Vec<OwnedObjectPath>>(manager, "Devices")
         .unwrap_or_default()
         .into_iter()
         .take(64)
     {
-        let (Some(device), Some(wifi)) = (
-            props(objects, path.as_str(), DEVICE),
-            props(objects, path.as_str(), WIRELESS),
-        ) else {
+        let Some(device) = props(objects, path.as_str(), DEVICE) else {
+            continue;
+        };
+        // NM_DEVICE_TYPE_ETHERNET excludes Wi-Fi, bridges and veth devices.
+        if property::<u32>(device, "DeviceType") == Some(1)
+            && let Some(wired) = props(objects, path.as_str(), WIRED)
+        {
+            ethernet.push(decode_ethernet(device, wired));
+        }
+        let Some(wifi) = props(objects, path.as_str(), WIRELESS) else {
             continue;
         };
         let active = property::<&zbus::zvariant::ObjectPath<'_>>(wifi, "ActiveAccessPoint");
@@ -232,10 +262,9 @@ pub fn decode_snapshot(objects: &ManagedObjects) -> WifiSnapshot {
                 personal: personal_mode(rsn),
             })
         }));
-        let name = property::<&str>(device, "Interface").unwrap_or("Wi-Fi");
         adapters.push(WifiAdapter {
             path: path.to_string(),
-            name: name.chars().filter(|c| !c.is_control()).take(48).collect(),
+            name: interface_name(device, "Wi-Fi"),
             managed: property(device, "Managed").unwrap_or(false),
             last_scan: property(wifi, "LastScan").unwrap_or(-1),
             networks,
@@ -252,11 +281,51 @@ pub fn decode_snapshot(objects: &ManagedObjects) -> WifiSnapshot {
     }
     adapters.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.path.cmp(&b.path)));
     adapters.truncate(MAX_ADAPTERS);
+    ethernet.sort_by(|a, b| a.name.cmp(&b.name));
+    ethernet.truncate(MAX_ADAPTERS);
     WifiSnapshot {
         available: true,
         enabled,
         hardware_enabled,
         adapters,
+        ethernet,
+    }
+}
+
+fn interface_name(device: &Properties, fallback: &str) -> String {
+    property::<&str>(device, "Interface")
+        .unwrap_or(fallback)
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(48)
+        .collect()
+}
+
+fn decode_ethernet(device: &Properties, wired: &Properties) -> EthernetAdapter {
+    let carrier = property::<bool>(wired, "Carrier");
+    let state = property::<u32>(device, "State").unwrap_or(0);
+    let link = if property::<bool>(device, "Managed") == Some(false) || state == 10 {
+        EthernetLink::Unmanaged
+    } else if carrier == Some(false) {
+        EthernetLink::NoCarrier
+    } else {
+        match state {
+            30 => EthernetLink::Disconnected,
+            40..=99 => EthernetLink::Connecting,
+            100 => EthernetLink::Connected,
+            110 => EthernetLink::Disconnecting,
+            120 => EthernetLink::Failed,
+            _ => EthernetLink::Unavailable,
+        }
+    };
+    EthernetAdapter {
+        name: interface_name(device, "Ethernet"),
+        link,
+        speed_mbps: if carrier == Some(true) {
+            property(wired, "Speed").unwrap_or(0)
+        } else {
+            0
+        },
     }
 }
 

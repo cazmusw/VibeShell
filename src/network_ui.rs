@@ -2,7 +2,7 @@ mod profiles;
 
 use crate::{
     audio::{BUS, PATH},
-    network::{PersonalMode, Protection, WifiAdapter, WifiNetwork, WifiSnapshot},
+    network::{EthernetLink, PersonalMode, Protection, WifiAdapter, WifiNetwork, WifiSnapshot},
 };
 use gtk::{gio, glib, prelude::*};
 use std::{
@@ -83,6 +83,7 @@ pub struct WifiPane {
     adapters: gtk::DropDown,
     scan: gtk::Button,
     results: gtk::ListBox,
+    ethernet: gtk::Label,
     offer_box: gtk::Box,
     offer_title: gtk::Label,
     offer: RefCell<Option<ProfileOffer>>,
@@ -146,6 +147,19 @@ impl WifiPane {
             .build();
         networks.append(&scroll);
 
+        let ethernet = gtk::Label::new(Some("Загрузка…"));
+        ethernet.set_xalign(0.);
+        ethernet.set_wrap(true);
+        let ethernet_scroll = gtk::ScrolledWindow::builder()
+            .max_content_height(112)
+            .propagate_natural_height(true)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .child(&ethernet)
+            .build();
+        let ethernet_section = gtk::Expander::new(Some("Ethernet"));
+        ethernet_section.set_child(Some(&ethernet_scroll));
+        networks.append(&ethernet_section);
+
         let profiles = profiles::ProfilePane::new();
         stack.add_named(&profiles.widget, Some("profiles"));
         let weak_stack = stack.downgrade();
@@ -168,6 +182,7 @@ impl WifiPane {
             adapters,
             scan,
             results,
+            ethernet,
             offer_box,
             offer_title,
             offer: RefCell::new(None),
@@ -312,7 +327,15 @@ impl WifiPane {
         let previous = self.snapshot.replace(Some(snapshot));
         let current = self.snapshot.borrow();
         let snapshot = current.as_ref().unwrap();
-        if previous.as_ref() != Some(snapshot) {
+        if previous.as_ref().is_none_or(|old| {
+            old.available != snapshot.available || old.ethernet != snapshot.ethernet
+        }) {
+            self.ethernet.set_text(&ethernet_summary(snapshot));
+        }
+        if previous
+            .as_ref()
+            .is_none_or(|old| old.adapters != snapshot.adapters)
+        {
             let old_path = previous
                 .as_ref()
                 .and_then(|old| self.selected(old))
@@ -640,4 +663,35 @@ impl Drop for WifiPane {
             timer.remove();
         }
     }
+}
+
+fn ethernet_summary(snapshot: &WifiSnapshot) -> String {
+    if !snapshot.available {
+        return "NetworkManager недоступен".into();
+    }
+    if snapshot.ethernet.is_empty() {
+        return "Проводные адаптеры не найдены".into();
+    }
+    snapshot
+        .ethernet
+        .iter()
+        .map(|adapter| {
+            let status = match adapter.link {
+                EthernetLink::Connected => "Подключён",
+                EthernetLink::Connecting => "Подключается…",
+                EthernetLink::Disconnecting => "Отключается…",
+                EthernetLink::Disconnected => "Отключён",
+                EthernetLink::NoCarrier => "Нет сигнала кабеля",
+                EthernetLink::Unmanaged => "Не управляется NetworkManager",
+                EthernetLink::Unavailable => "Недоступен",
+                EthernetLink::Failed => "Ошибка подключения",
+            };
+            if adapter.speed_mbps == 0 {
+                format!("{} — {status}", adapter.name)
+            } else {
+                format!("{} — {status}, {} Мбит/с", adapter.name, adapter.speed_mbps)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
